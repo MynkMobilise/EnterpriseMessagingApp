@@ -1,0 +1,58 @@
+# ============================================
+# Root .gitignore
+# ============================================
+# Protects frontend .env files and build outputs
+# Backend .env is already protected in backend/.gitignore
+# ============================================
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+.env.bak
+*.env.bak
+
+# Database dumps / exports (contain live secrets)
+*-export.sql
+*-migration-export.sql
+railway-migration-export.sql
+backend/railway-migration-export.sql
+
+# Build outputs
+build/
+dist/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+coverage/
+.nyc_output/
+test-results/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+

@@ -1,0 +1,150 @@
+const { User, Organization } = require('../models');
+const { AppError, AuthenticationError, AuthorizationError } = require('../utils/errorTypes');
+const { verifyAccessToken } = require('../config/jwt');
+
+/**
+ * Authenticate user via JWT token
+ */
+const authenticate = async (req, res, next) => {
+  try {
+    // Get token from header
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      throw new AuthenticationError('No token provided');
+    }
+
+    const token = authHeader.substring(7);
+
+    // Verify token
+    const decoded = verifyAccessToken(token);
+
+    // Get user from database
+    const user = await User.findByPk(decoded.userId, {
+      include: [
+        {
+          model: Organization,
+          as: 'organization',
+        },
+      ],
+    });
+
+    if (!user) {
+      throw new AuthenticationError('User not found');
+    }
+
+    if (user.status !== 'active') {
+      throw new AppError('User account is not active', 403);
+    }
+
+    // Get permissions from user object
+    const permissions = user.permissions || {};
+
+    // Store original user organization ID for reference
+    const userOrganizationId = user.organizationId;
+
+    // Check for X-Organization-Id header for organization switching
+    const headerOrgId = req.headers['x-organization-id'] || req.headers['X-Organization-Id'];
+    
+    let resolvedOrganizationId = userOrganizationId;
+
+    if (headerOrgId) {
+      // If user is super_admin, allow switching to any organization
+      if (user.role === 'super_admin') {
+        resolvedOrganizationId = headerOrgId;
+      } else {
+        // Regular users can only access their own organization
+        // Validate that the header organization ID matches user's organization
+        if (headerOrgId !== userOrganizationId) {
+          return next(new AuthorizationError('Cannot access this organization'));
+        }
+        resolvedOrganizationId = headerOrgId;
+      }
+    }
+
+    // Attach user to request
+    req.user = user;
+    req.organizationId = resolvedOrganizationId;
+    req.userOrganizationId = userOrganizationId; // Store original for reference
+    req.userPermissions = permissions;
+
+    next();
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError') {
+      return next(new AuthenticationError('Invalid token'));
+    }
+    if (error.name === 'TokenExpiredError') {
+      return next(new AuthenticationError('Token expired'));
+    }
+    next(error);
+  }
+};
+
+/**
+ * Require specific permission
+ */
+const requirePermission = (permission) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return next(new AuthenticationError('Authentication required'));
+    }
+
+    const hasPermission = req.userPermissions && req.userPermissions[permission];
+
+    if (!hasPermission) {
+      return next(new AuthorizationError(`Permission required: ${permission}`));
+    }
+
+    next();
+  };
+};
+
+/**
+ * Require specific role(s)
+ */
+const requireRole = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return next(new AuthenticationError('Authentication required'));
+    }
+
+    if (!roles.includes(req.user.role)) {
+      return next(new AuthorizationError(`Role required: ${roles.join(' or ')}`));
+    }
+
+    next();
+  };
+};
+
+/**
+ * Optional authentication (doesn't fail if no token)
+ */
+const optionalAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      const decoded = verifyAccessToken(token);
+      const user = await User.findByPk(decoded.userId);
+
+      if (user && user.status === 'active') {
+        req.user = user;
+        req.organizationId = user.organizationId;
+      }
+    }
+
+    next();
+  } catch (error) {
+    // Ignore errors for optional auth
+    next();
+  }
+};
+
+module.exports = {
+  authenticate,
+  requirePermission,
+  requireRole,
+  optionalAuth,
+};
+

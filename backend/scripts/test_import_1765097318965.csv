@@ -1,0 +1,3 @@
+name,phoneNumber,email,company,tags,country,city,jobTitle,notes
+Test User 1,+1234567890,test1@example.com,Test Corp,"Sales,Marketing",USA,New York,Manager,Test contact 1
+Test User 2,+1987654321,test2@example.com,Test Inc,"Support",USA,Los Angeles,Developer,Test contact 2
