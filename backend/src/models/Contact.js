@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const Contact = sequelize.define('contacts', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   organizationId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'organization_id',
     references: {
@@ -17,7 +17,7 @@ const Contact = sequelize.define('contacts', {
     },
   },
   createdBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'created_by',
     references: {

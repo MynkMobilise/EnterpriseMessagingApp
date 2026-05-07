@@ -120,6 +120,15 @@ class SettingsService {
       // Ensure customSettings is always an object in the response
       settingsJson.customSettings = customSettings;
 
+      // For WhatsApp credentials we follow the same pattern as customApiKey:
+      // never echo the (encrypted) secrets back to the UI, but tell it whether
+      // they exist so the form can show "Saved (click Replace)" instead of
+      // a blank input that looks like the value was lost on refresh.
+      settingsJson.hasWhatsappAccessToken = !!settingsJson.whatsappAccessToken;
+      settingsJson.hasWhatsappAppSecret = !!settingsJson.whatsappAppSecret;
+      delete settingsJson.whatsappAccessToken;
+      delete settingsJson.whatsappAppSecret;
+
       return settingsJson;
     } catch (error) {
       logger.error('Error getting organization settings:', error);
@@ -245,15 +254,15 @@ class SettingsService {
       const trimmedKey = String(customApiKey).trim();
       if (trimmedKey !== '') {
         try {
-          console.log('Attempting to encrypt custom API key, length:', trimmedKey.length);
+          if (process.env.VERBOSE === 'true') console.log('Attempting to encrypt custom API key, length:', trimmedKey.length);
           const encryptedKey = encrypt(trimmedKey);
-          console.log('Encryption successful, encrypted key length:', encryptedKey.length);
+          if (process.env.VERBOSE === 'true') console.log('Encryption successful, encrypted key length:', encryptedKey.length);
           customSettingsUpdate.customApiKey = encryptedKey;
           // Ensure smsProvider is set to 'other' when custom API key is provided
           if (mainData.smsProvider === undefined) {
             mainData.smsProvider = 'other';
           }
-          console.log('Successfully encrypted custom API key');
+          if (process.env.VERBOSE === 'true') console.log('Successfully encrypted custom API key');
         } catch (error) {
           console.error('Failed to encrypt custom API key');
           console.error('Error message:', error.message);
@@ -374,7 +383,7 @@ class SettingsService {
           ...currentCustomSettings,
           ...customSettingsUpdate,
         };
-          console.log('Merged customSettings:', JSON.stringify(mainData.customSettings, null, 2));
+          if (process.env.VERBOSE === 'true') console.log('Merged customSettings:', JSON.stringify(mainData.customSettings, null, 2));
         }
 
         try {
@@ -437,7 +446,24 @@ class SettingsService {
       }
 
       const updatedSettings = await this.getOrganizationSettings(organizationId);
-      console.log('Returning updated settings:', JSON.stringify(updatedSettings, null, 2));
+      if (process.env.VERBOSE === 'true') console.log('Returning updated settings:', JSON.stringify(updatedSettings, null, 2));
+
+      // If WhatsApp credentials were touched, kick off an immediate template
+      // sync in the background so the user doesn't have to wait for the next
+      // 15-minute cron tick to see their Meta-approved templates locally.
+      // Fire-and-forget — don't block the settings response on Meta's API.
+      const whatsappFieldsTouched =
+        data?.whatsappAccessToken !== undefined ||
+        data?.whatsappBusinessAccountId !== undefined ||
+        data?.whatsappPhoneNumberId !== undefined;
+      if (whatsappFieldsTouched && updatedSettings?.whatsappBusinessAccountId && updatedSettings?.hasWhatsappAccessToken) {
+        const templateSyncService = require('./templateSyncService');
+        templateSyncService
+          .syncForOrg(organizationId)
+          .then((r) => logger.info('Post-save template sync', { organizationId, ...r }))
+          .catch((e) => logger.warn('Post-save template sync failed', { organizationId, error: e.message }));
+      }
+
       return updatedSettings;
     } catch (error) {
       logger.error('Error updating organization settings:', error);

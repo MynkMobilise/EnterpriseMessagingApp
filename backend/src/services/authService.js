@@ -80,25 +80,41 @@ class AuthService {
    */
   async login(data, ipAddress, userAgent) {
     const { email, password, organizationSlug } = data;
+    const normalizedEmail = (email || '').toLowerCase().trim();
 
-    // Find organization
-    const organization = await Organization.findOne({
-      where: { slug: organizationSlug },
-    });
+    // Two paths:
+    //   (a) orgSlug provided  → find user scoped to that org (legacy, also lets the
+    //                            same email exist in multiple orgs and disambiguate)
+    //   (b) orgSlug omitted   → look up the user by email alone. If exactly one
+    //                            non-deleted user matches, use their org. If 0 or 2+,
+    //                            return generic "Invalid credentials" so we don't
+    //                            leak which emails are registered.
+    let organization = null;
+    let user = null;
 
-    if (!organization) {
-      throw new AuthenticationError('Invalid credentials');
+    if (organizationSlug) {
+      organization = await Organization.findOne({ where: { slug: organizationSlug } });
+      if (!organization) throw new AuthenticationError('Invalid credentials');
+      user = await User.findOne({
+        where: { email: normalizedEmail, organizationId: organization.id },
+      });
+    } else {
+      const matches = await User.findAll({ where: { email: normalizedEmail } });
+      if (matches.length === 1) {
+        user = matches[0];
+        organization = await Organization.findByPk(user.organizationId);
+      } else if (matches.length > 1) {
+        // Same email registered with multiple orgs — caller must specify slug.
+        throw new AppError(
+          'This email is registered with multiple organizations. Please specify organizationSlug.',
+          400,
+          'MULTIPLE_ORGS_FOR_EMAIL',
+        );
+      }
+      // 0 matches: leave user = null, fall through to the generic "Invalid credentials" error below.
     }
 
-    // Find user
-    const user = await User.findOne({
-      where: {
-        email: email.toLowerCase(),
-        organizationId: organization.id,
-      },
-    });
-
-    if (!user) {
+    if (!user || !organization) {
       throw new AuthenticationError('Invalid credentials');
     }
 
@@ -443,6 +459,7 @@ class AuthService {
         canManageAPIKeys: true,
         canAssignRoles: true,
         canManageOrganization: true,
+        canViewLiveChat: true,
       },
       admin: {
         canSendMessages: true,
@@ -455,6 +472,7 @@ class AuthService {
         canManageAPIKeys: true,
         canAssignRoles: false,
         canManageOrganization: true,
+        canViewLiveChat: true,
       },
       manager: {
         canSendMessages: true,
@@ -466,6 +484,7 @@ class AuthService {
         canManageSettings: false,
         canManageAPIKeys: false,
         canAssignRoles: false,
+        canViewLiveChat: true,
       },
       operator: {
         canSendMessages: true,
@@ -477,6 +496,7 @@ class AuthService {
         canManageSettings: false,
         canManageAPIKeys: false,
         canAssignRoles: false,
+        canViewLiveChat: true,
       },
       viewer: {
         canSendMessages: false,
@@ -488,6 +508,7 @@ class AuthService {
         canManageSettings: false,
         canManageAPIKeys: false,
         canAssignRoles: false,
+        canViewLiveChat: true,
       },
     };
 

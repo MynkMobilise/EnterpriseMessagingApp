@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const ApiKeyUsageLog = sequelize.define('api_key_usage_logs', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   apiKeyId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'api_key_id',
     references: {

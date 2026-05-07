@@ -1,4 +1,5 @@
 const settingsService = require('../services/settingsService');
+const ssoService = require('../services/ssoService');
 
 class SettingsController {
   /**
@@ -105,7 +106,38 @@ class SettingsController {
   async testWhatsAppConnection(req, res, next) {
     try {
       const whatsappService = require('../services/whatsappService');
-      const result = await whatsappService.testConnection(req.body);
+      const { OrganizationSettings } = require('../models');
+      const { decrypt, isEncrypted } = require('../utils/encryption');
+
+      // Allow the frontend to "test with the saved token" — when the user has
+      // existing credentials in DB and just clicks Test Connection without
+      // re-pasting, fall back to whatever is already stored. Anything the
+      // user explicitly typed in the form takes precedence over DB values.
+      const credentials = { ...req.body };
+      if (!credentials.whatsappAccessToken || !credentials.whatsappBusinessAccountId || !credentials.whatsappPhoneNumberId) {
+        const stored = await OrganizationSettings.findOne({ where: { organizationId: req.organizationId } });
+        if (stored) {
+          if (!credentials.whatsappBusinessAccountId && stored.whatsappBusinessAccountId) {
+            credentials.whatsappBusinessAccountId = stored.whatsappBusinessAccountId;
+          }
+          if (!credentials.whatsappPhoneNumberId && stored.whatsappPhoneNumberId) {
+            credentials.whatsappPhoneNumberId = stored.whatsappPhoneNumberId;
+          }
+          if (!credentials.whatsappAccessToken && stored.whatsappAccessToken) {
+            try {
+              credentials.whatsappAccessToken = isEncrypted(stored.whatsappAccessToken)
+                ? decrypt(stored.whatsappAccessToken)
+                : stored.whatsappAccessToken;
+            } catch (_) {
+              // decryption failed (likely ENCRYPTION_KEY mismatch). Leave the
+              // field empty so testConnection raises the clear "missing token"
+              // error rather than silently testing with garbage.
+            }
+          }
+        }
+      }
+
+      const result = await whatsappService.testConnection(credentials);
       res.json({
         success: true,
         message: result.message,
@@ -128,6 +160,53 @@ class SettingsController {
           apiKey: apiKey || null,
         },
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ─── SSO Integration endpoints ─────────────────────────────────────
+  async getSsoConfig(req, res, next) {
+    try {
+      const { OrganizationSettings } = require('../models');
+      const settings = await OrganizationSettings.findOne({ where: { organizationId: req.organizationId } });
+      const { secret } = await ssoService.getOrCreateSecret(req.organizationId);
+      res.json({
+        success: true,
+        data: {
+          ssoEnabled: settings?.ssoEnabled || false,
+          ssoDefaultRole: settings?.ssoDefaultRole || 'operator',
+          ssoSecret: secret,
+          exchangeEndpoint: '/api/v1/auth/sso/exchange',
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateSsoConfig(req, res, next) {
+    try {
+      const { ssoEnabled, ssoDefaultRole } = req.body;
+      const updates = {};
+      if (typeof ssoEnabled === 'boolean') {
+        const r = await ssoService.setEnabled(req.organizationId, ssoEnabled);
+        Object.assign(updates, r);
+      }
+      if (ssoDefaultRole) {
+        const r = await ssoService.setDefaultRole(req.organizationId, ssoDefaultRole);
+        Object.assign(updates, r);
+      }
+      res.json({ success: true, data: updates });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async rotateSsoSecret(req, res, next) {
+    try {
+      const { secret } = await ssoService.rotateSecret(req.organizationId);
+      res.json({ success: true, data: { ssoSecret: secret } });
     } catch (error) {
       next(error);
     }

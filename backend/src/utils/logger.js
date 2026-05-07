@@ -9,7 +9,11 @@ if (!fs.existsSync(logsDir)) {
 }
 
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
+  // Default level is 'warn' so the console stays clean during normal operation
+  // (server start banner is printed via process.stdout.write, not winston).
+  // Set LOG_LEVEL=info in .env to bring back the chatty per-message logs while
+  // debugging. File transports below still record everything via 'combined.log'.
+  level: process.env.LOG_LEVEL || 'warn',
   format: winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.errors({ stack: true }),

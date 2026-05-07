@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   X,
   MessageSquare,
@@ -32,9 +33,11 @@ import { apiService } from '../../utils/api';
 import { validateEmail, validatePhone } from '../../utils/security';
 
 interface CreateTemplateProps {
-  onClose: () => void;
+  // Optional callback overrides — kept for callers that don't go through React Router.
+  // When unset, the component uses useParams() / useNavigate() directly.
+  onClose?: () => void;
   onSave?: (template: any) => void;
-  templateId?: string | number; // For editing existing template
+  templateId?: string | number;
 }
 
 type Channel = 'whatsapp' | 'sms' | 'email' | 'fcm';
@@ -56,7 +59,19 @@ interface Button {
   value: string;
 }
 
-export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplateProps) {
+// Unique-enough handle for client-state list items (cards, buttons). Plain
+// `Date.now().toString()` collides when two are added inside the same ms,
+// which then breaks React `key` lookups and submit-time card ordering.
+function makeId(prefix = ''): string {
+  return `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: CreateTemplateProps) {
+  const navigate = useNavigate();
+  const params = useParams<{ id?: string }>();
+  // Prefer route param when present (deep-linked /templates/:id/edit), fall back to prop.
+  const templateId = templateIdProp ?? params.id;
+  const closeForm = onClose || (() => navigate('/templates'));
   const [loading, setLoading] = useState(!!templateId); // Load data if editing
   const isEditMode = !!templateId;
   
@@ -172,21 +187,49 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
         
         // WhatsApp-specific fields
         if (template.channel === 'whatsapp') {
-          setTemplateType((template.type as TemplateType) || 'standard');
-          // Note: Header, footer, buttons would need to be loaded from template structure
-          // For now, we'll just set the basic fields
+          setTemplateType((template.templateType as TemplateType) || 'standard');
+          if (template.headerType) setHeaderType(template.headerType as HeaderType);
+          if (template.headerContent) setHeaderText(template.headerContent);
+          if (template.footer) setFooterText(template.footer);
+          if (Array.isArray(template.buttons)) {
+            setButtons(
+              template.buttons.map((b: any, i: number) => ({
+                id: b.id || String(i + 1),
+                type: (b.type || 'url') as any,
+                text: b.text || '',
+                value: b.value || b.url || b.phone_number || '',
+              }))
+            );
+          }
+          if (Array.isArray(template.cards) && template.cards.length > 0) {
+            setCarouselCards(
+              template.cards.map((c: any, i: number) => ({
+                id: c.id || String(i + 1),
+                media: c.media || null,
+                content: c.content || '',
+                buttons: Array.isArray(c.buttons)
+                  ? c.buttons.map((b: any, bi: number) => ({
+                      id: b.id || String(bi + 1),
+                      type: (b.type || 'url') as any,
+                      text: b.text || '',
+                      value: b.value || b.url || b.phone_number || '',
+                    }))
+                  : [],
+              }))
+            );
+          }
         }
       } else {
         toast.error('Failed to load template', {
           description: response.error?.message || 'Template not found',
         });
-        onClose();
+        closeForm();
       }
     } catch (error: any) {
       toast.error('Failed to load template', {
         description: error.response?.data?.error?.message || error.message,
       });
-      onClose();
+      closeForm();
     } finally {
       setLoading(false);
     }
@@ -206,7 +249,7 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
     }
     setButtons([
       ...buttons,
-      { id: Date.now().toString(), type: 'url', text: '', value: '' },
+      { id: makeId(), type: 'url', text: '', value: '' },
     ]);
   };
 
@@ -225,7 +268,7 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
     }
     setCarouselCards([
       ...carouselCards,
-      { id: Date.now().toString(), media: null, content: '', buttons: [] },
+      { id: makeId(), media: null, content: '', buttons: [] },
     ]);
     setActiveCardIndex(carouselCards.length);
   };
@@ -254,7 +297,7 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
     }
     const newCards = [...carouselCards];
     newCards[cardIndex].buttons.push({
-      id: Date.now().toString(),
+      id: makeId(),
       type: 'url',
       text: '',
       value: '',
@@ -317,7 +360,11 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
       }
     } else {
       if (!bodyText) {
-        toast.error('Message content is required');
+        toast.error(
+          channel === 'whatsapp' && templateType === 'carousel'
+            ? 'Lede message (shown above carousel cards) is required'
+            : 'Message content is required'
+        );
         return;
       }
     }
@@ -343,6 +390,22 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
         templateData.headerContent = headerText || undefined;
         templateData.footer = footerText || undefined;
         templateData.buttons = buttons.length > 0 ? buttons : undefined;
+
+        // Carousel: persist template type + per-card definitions. The body
+        // field is still required as the carousel's "lede" message shown
+        // above the cards.
+        templateData.templateType = templateType; // 'standard' | 'carousel' | 'limited_time'
+        if (templateType === 'carousel') {
+          templateData.cards = carouselCards.map((c) => ({
+            id: c.id,
+            // Backend schema rejects empty media.url. If the URL is missing
+            // (e.g. a Meta-imported card not yet re-uploaded, or a freshly
+            // added card), normalize to null so save isn't blocked.
+            media: c.media && c.media.url ? c.media : null,
+            content: c.content,
+            buttons: c.buttons || [],
+          }));
+        }
       } else if (channel === 'sms') {
         templateData.smsTemplateId = smsTemplateId || undefined;
       } else if (channel === 'email') {
@@ -364,11 +427,23 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
         // Update existing template
         toast.loading('Updating template...', { id: 'update-template' });
         const response = await apiService.templates.update(templateId.toString(), templateData);
-        
+
         if (response.success) {
-          toast.success(`${channel === 'whatsapp' ? 'WhatsApp' : channel === 'sms' ? 'SMS' : channel === 'email' ? 'Email' : 'FCM'} template updated successfully`, { id: 'update-template' });
+          const channelLabel =
+            channel === 'whatsapp' ? 'WhatsApp' :
+            channel === 'sms' ? 'SMS' :
+            channel === 'email' ? 'Email' : 'FCM';
+          // Backend resets status to 'draft' when content changes — surface
+          // that so the operator knows they need to re-submit for approval.
+          const resetToDraft = response.data?.status === 'draft';
+          toast.success(`${channelLabel} template updated`, {
+            description: resetToDraft
+              ? 'Approval status was reset — submit for approval again to enable sending.'
+              : undefined,
+            id: 'update-template',
+          });
           if (onSave) onSave(response.data);
-          onClose();
+          closeForm();
         } else {
           toast.error('Failed to update template', {
             description: response.error?.message || 'An unknown error occurred',
@@ -383,7 +458,7 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
         if (response.success) {
           toast.success(`${channel === 'whatsapp' ? 'WhatsApp' : channel === 'sms' ? 'SMS' : channel === 'email' ? 'Email' : 'FCM'} template created successfully`, { id: 'create-template' });
           if (onSave) onSave(response.data);
-          onClose();
+          closeForm();
         } else {
           toast.error('Failed to create template', {
             description: response.error?.message || 'An unknown error occurred',
@@ -542,7 +617,7 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
           <div className="px-6 py-4 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
             <div className="flex items-center gap-4">
               <button
-                onClick={onClose}
+                onClick={() => closeForm()}
                 className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5 text-gray-600 dark:text-gray-400" />
@@ -584,7 +659,7 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
                 )}
               </button>
               <button
-                onClick={onClose}
+                onClick={() => closeForm()}
                 className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
               >
                 Cancel
@@ -813,7 +888,7 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
                           <Upload className="w-12 h-12 text-gray-400 mx-auto mb-3" />
                           <label className="cursor-pointer">
                             <span className="text-sm text-blue-600 hover:text-blue-700">
-                              Upload {headerType}
+                              {headerContent ? `Replace ${headerType}` : `Upload ${headerType}`}
                             </span>
                             <input
                               type="file"
@@ -824,13 +899,41 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
                                   ? 'video/*'
                                   : '.pdf,.doc,.docx'
                               }
-                              onChange={(e) => setHeaderMedia(e.target.files?.[0] || null)}
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                setHeaderMedia(file);
+                                try {
+                                  toast.loading('Uploading…', { id: 'header-upload' });
+                                  const r = await apiService.media.upload(file);
+                                  const url = r?.data?.url || r?.data?.media?.url;
+                                  if (r?.success && url) {
+                                    // headerText doubles as the URL when the
+                                    // header is media — that's what the submit
+                                    // payload reads from.
+                                    setHeaderText(url);
+                                    toast.success('Uploaded', { id: 'header-upload' });
+                                  } else {
+                                    toast.error('Upload failed', { id: 'header-upload' });
+                                  }
+                                } catch (err: any) {
+                                  toast.error('Upload failed', {
+                                    description: err?.response?.data?.error?.message || err?.message,
+                                    id: 'header-upload',
+                                  });
+                                }
+                              }}
                               className="hidden"
                             />
                           </label>
                           {headerMedia && (
                             <p className="text-sm text-green-600 dark:text-green-400 mt-3">
                               ✓ {headerMedia.name}
+                            </p>
+                          )}
+                          {headerText && !headerMedia && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 break-all">
+                              Saved: {headerText}
                             </p>
                           )}
                         </div>
@@ -843,9 +946,13 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
                     <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
                       <div>
                         <h2 className="text-base text-gray-900 dark:text-white">
-                          Message Content <span className="text-red-600">*</span>
+                          {templateType === 'carousel' ? 'Lede Message' : 'Message Content'} <span className="text-red-600">*</span>
                         </h2>
-                        <p className="text-xs text-gray-500 mt-1">The main content of your message</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {templateType === 'carousel'
+                            ? 'The intro message shown above the carousel cards (required by Meta).'
+                            : 'The main content of your message'}
+                        </p>
                       </div>
                       <button
                         onClick={addVariable}
@@ -1007,6 +1114,31 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
                 </>
               )}
 
+              {/* WhatsApp Carousel: Lede Message (required by Meta) */}
+              {channel === 'whatsapp' && templateType === 'carousel' && (
+                <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 shadow-sm">
+                  <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+                    <h2 className="text-base text-gray-900 dark:text-white">
+                      Lede Message <span className="text-red-600">*</span>
+                    </h2>
+                    <p className="text-xs text-gray-500 mt-1">
+                      The intro message shown above the carousel cards (required by Meta).
+                    </p>
+                  </div>
+                  <div className="p-6 space-y-3">
+                    <textarea
+                      value={bodyText}
+                      onChange={(e) => setBodyText(e.target.value)}
+                      placeholder="e.g. Check out our latest travel packages!"
+                      rows={3}
+                      maxLength={1024}
+                      className="w-full px-4 py-3 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white resize-none"
+                    />
+                    <p className="text-xs text-gray-500 text-right">{bodyText.length} / 1024</p>
+                  </div>
+                </div>
+              )}
+
               {/* WhatsApp Carousel Template */}
               {channel === 'whatsapp' && templateType === 'carousel' && (
                 <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 shadow-sm">
@@ -1070,18 +1202,105 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
                           )}
                         </div>
 
-                        {/* Media Upload */}
+                        {/* Media Upload — uploads to /api/v1/media (Media Library)
+                            and stores the returned URL on the card so the
+                            preview can render it. Replace/Remove controls appear
+                            once an image is attached. */}
                         <div>
                           <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
                             Media
                           </label>
-                          <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-6 text-center bg-white dark:bg-gray-900">
-                            <label className="cursor-pointer flex flex-col items-center gap-2">
-                              <Upload className="w-8 h-8 text-gray-400" />
-                              <span className="text-sm text-blue-600">Upload image or video</span>
-                              <input type="file" accept="image/*,video/*" className="hidden" />
-                            </label>
-                          </div>
+                          {activeCard.media ? (
+                            <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-3 bg-white dark:bg-gray-900">
+                              <div className="relative inline-block w-full">
+                                {activeCard.media.type === 'image' ? (
+                                  <img
+                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3003'}${activeCard.media.url}`}
+                                    alt={`Card ${activeCardIndex + 1} media`}
+                                    className="max-h-56 mx-auto rounded object-contain"
+                                  />
+                                ) : (
+                                  <video
+                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3003'}${activeCard.media.url}`}
+                                    controls
+                                    className="max-h-56 mx-auto rounded"
+                                  />
+                                )}
+                              </div>
+                              <div className="flex justify-center gap-2 mt-3">
+                                <label className="cursor-pointer text-sm px-3 py-1.5 border border-gray-300 dark:border-gray-700 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300">
+                                  Replace
+                                  <input
+                                    type="file"
+                                    accept="image/*,video/*"
+                                    onChange={async (e) => {
+                                      const file = e.target.files?.[0];
+                                      if (!file) return;
+                                      const t = file.type.startsWith('video/') ? 'video' : 'image';
+                                      try {
+                                        const r = await apiService.media.upload(file);
+                                        if (r?.success && r.data?.url) {
+                                          updateCarouselCard(activeCardIndex, { media: { type: t, url: r.data.url } });
+                                          toast.success('Media replaced');
+                                        }
+                                      } catch (err: any) {
+                                        toast.error('Upload failed', {
+                                          description: err.response?.data?.error?.message || err.message,
+                                        });
+                                      } finally {
+                                        e.target.value = '';
+                                      }
+                                    }}
+                                    className="hidden"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => updateCarouselCard(activeCardIndex, { media: null })}
+                                  className="text-sm px-3 py-1.5 border border-red-300 dark:border-red-700 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-6 text-center bg-white dark:bg-gray-900">
+                              <label className="cursor-pointer flex flex-col items-center gap-2">
+                                <Upload className="w-8 h-8 text-gray-400" />
+                                <span className="text-sm text-blue-600">Upload image or video</span>
+                                <span className="text-xs text-gray-500">JPG, PNG, MP4 — up to 16MB</span>
+                                <input
+                                  type="file"
+                                  accept="image/*,video/*"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    const t = file.type.startsWith('video/') ? 'video' : 'image';
+                                    if (file.size > 16 * 1024 * 1024) {
+                                      toast.error('File too large', { description: 'Maximum 16MB' });
+                                      return;
+                                    }
+                                    try {
+                                      const r = await apiService.media.upload(file);
+                                      if (r?.success && r.data?.url) {
+                                        updateCarouselCard(activeCardIndex, { media: { type: t, url: r.data.url } });
+                                        toast.success('Media uploaded');
+                                      } else {
+                                        toast.error('Upload failed', { description: r?.error?.message });
+                                      }
+                                    } catch (err: any) {
+                                      toast.error('Upload failed', {
+                                        description: err.response?.data?.error?.message || err.message,
+                                      });
+                                    } finally {
+                                      e.target.value = '';
+                                    }
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          )}
                         </div>
 
                         {/* Card Content */}
@@ -1651,8 +1870,26 @@ export function CreateTemplate({ onClose, onSave, templateId }: CreateTemplatePr
                         {/* Body */}
                         {templateType === 'carousel' ? (
                           <div className="space-y-2">
-                            <div className="w-full h-28 bg-gray-200 dark:bg-gray-600 rounded-lg flex items-center justify-center">
-                              <ImageIcon className="w-8 h-8 text-gray-400" />
+                            <div className="w-full h-28 bg-gray-200 dark:bg-gray-600 rounded-lg flex items-center justify-center overflow-hidden">
+                              {activeCard?.media?.url ? (
+                                activeCard.media.type === 'video' ? (
+                                  <video
+                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3003'}${activeCard.media.url}`}
+                                    className="w-full h-full object-cover"
+                                    muted
+                                  />
+                                ) : (
+                                  <img
+                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3003'}${activeCard.media.url}`}
+                                    alt="Card media"
+                                    className="w-full h-full object-cover"
+                                  />
+                                )
+                              ) : activeCard?.media?.type === 'video' ? (
+                                <Video className="w-8 h-8 text-gray-400" />
+                              ) : (
+                                <ImageIcon className="w-8 h-8 text-gray-400" />
+                              )}
                             </div>
                             <p className="text-xs text-gray-900 dark:text-white whitespace-pre-wrap">
                               {activeCard?.content || 'Card content...'}

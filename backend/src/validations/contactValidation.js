@@ -12,7 +12,7 @@ const contactValidation = {
     tags: Joi.array().items(Joi.string()).optional(),
     productsInterest: Joi.array().items(Joi.string()).optional(),
     source: Joi.string().optional(),
-    assignedTo: Joi.string().uuid().allow('', null).optional(),
+    assignedTo: Joi.number().integer().positive().allow('', null).optional(),
     status: Joi.string().valid('active', 'inactive', 'blocked', 'unsubscribed').optional(),
     whatsappOptIn: Joi.boolean().optional(),
     smsOptIn: Joi.boolean().optional(),
@@ -31,7 +31,7 @@ const contactValidation = {
     tags: Joi.array().items(Joi.string()).optional(),
     productsInterest: Joi.array().items(Joi.string()).optional(),
     source: Joi.string().optional(),
-    assignedTo: Joi.string().uuid().allow('', null).optional(),
+    assignedTo: Joi.number().integer().positive().allow('', null).optional(),
     status: Joi.string().valid('active', 'inactive', 'blocked', 'unsubscribed').optional(),
     whatsappOptIn: Joi.boolean().optional(),
     smsOptIn: Joi.boolean().optional(),
@@ -41,7 +41,7 @@ const contactValidation = {
 
   bulkOperation: Joi.object({
     action: Joi.string().valid('add_tags', 'remove_tags', 'update_status', 'delete').required(),
-    contactIds: Joi.array().items(Joi.string().uuid()).min(1).required(),
+    contactIds: Joi.array().items(Joi.number().integer().positive()).min(1).required(),
     tags: Joi.array().items(Joi.string()).when('action', {
       is: Joi.string().valid('add_tags', 'remove_tags'),
       then: Joi.required(),

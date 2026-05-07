@@ -1,6 +1,22 @@
-const { Organization, User } = require('../models');
+const crypto = require('crypto');
+const bcrypt = require('bcrypt');
+const { Organization, OrganizationSettings, User } = require('../models');
 const { AppError, NotFoundError, ConflictError } = require('../utils/errorTypes');
 const { Op } = require('sequelize');
+const { encrypt } = require('../utils/encryption');
+const { sendWelcomeOrganizationEmail } = require('../config/email');
+const logger = require('../utils/logger');
+const authService = require('./authService');
+
+// Generate a friendly random password (alphanum + symbol) for the auto-created admin.
+function generateInitialPassword() {
+  const charset = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const symbols = '!@#$%^&*';
+  let pw = '';
+  for (let i = 0; i < 10; i++) pw += charset[Math.floor(Math.random() * charset.length)];
+  pw += symbols[Math.floor(Math.random() * symbols.length)];
+  return pw;
+}
 
 class OrganizationService {
   /**
@@ -83,10 +99,23 @@ class OrganizationService {
   }
 
   /**
-   * Create organization (only super admin)
+   * Create organization (only super admin).
+   *
+   * Side effects beyond inserting the org row:
+   *   1. Creates an organization_settings row with a freshly-generated SSO secret
+   *      (encrypted at rest with the app-wide ENCRYPTION_KEY).
+   *   2. Auto-creates an admin user using the provided contact email + a random
+   *      initial password marked must-change-on-first-login.
+   *   3. Sends a welcome email to the contact email with login URL + slug + the
+   *      initial password. Email failures are logged but do NOT roll back
+   *      creation — the org is still usable, the admin can use forgot-password.
    */
   async create(createdBy, data) {
-    const { name, industry, plan, status, maxUsers, maxMessagesPerMonth, slug } = data;
+    const { name, industry, plan, status, maxUsers, maxMessagesPerMonth, slug, email, phone, website } = data;
+
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      throw new AppError('A valid contact email is required to create an organization (welcome email will be sent here).', 400);
+    }
 
     // Generate slug from name if not provided
     let orgSlug = slug || this.generateSlug(name);
@@ -125,6 +154,59 @@ class OrganizationService {
       maxUsers: maxUsers || 5,
       maxMessagesPerMonth: maxMessagesPerMonth || 1000,
       usedMessages: 0,
+      email,
+      phone,
+      website,
+    });
+
+    // Generate SSO secret (64 hex chars = 256 bits) and provision settings row.
+    // Stored encrypted with the app-wide ENCRYPTION_KEY so a DB dump alone is
+    // not enough to forge SSO tokens.
+    const ssoSecretPlain = crypto.randomBytes(32).toString('hex');
+    const ssoSecretEncrypted = encrypt(ssoSecretPlain);
+    await OrganizationSettings.create({
+      organizationId: organization.id,
+      ssoEnabled: false,
+      ssoSecretEncrypted,
+      ssoDefaultRole: 'operator',
+    });
+
+    // Auto-create admin user. Initial password is generated; user is forced to
+    // change it on first login via the existing must-change-password flow.
+    const initialPassword = generateInitialPassword();
+    const passwordHash = await bcrypt.hash(initialPassword, 10);
+    const adminPermissions = authService.getDefaultPermissions('admin');
+    let adminUser;
+    try {
+      adminUser = await User.create({
+        organizationId: organization.id,
+        email,
+        passwordHash,
+        firstName: 'Admin',
+        lastName: name.split(/\s+/)[0] || 'User',
+        role: 'admin',
+        status: 'active',
+        emailVerified: false,
+        mustChangePassword: true,
+        permissions: adminPermissions,
+        authProvider: 'local',
+      });
+    } catch (e) {
+      // Could fail if the email is already a user in another org with a unique constraint;
+      // we don't fail the org creation but log it loudly.
+      logger.error('Org created but admin user creation failed', { orgId: organization.id, error: e.message });
+    }
+
+    // Send welcome email (best-effort — never block org creation on SMTP).
+    sendWelcomeOrganizationEmail({
+      to: email,
+      organizationName: name,
+      organizationSlug: orgSlug,
+      adminEmail: email,
+      adminPassword: adminUser ? initialPassword : null,
+      loginUrl: process.env.FRONTEND_URL?.split(',')[0],
+    }).catch((err) => {
+      logger.warn('Welcome email failed to send', { orgId: organization.id, error: err.message });
     });
 
     const userCount = await User.count({

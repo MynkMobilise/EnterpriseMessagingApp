@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Eye, EyeOff, Copy, AlertTriangle, CheckCircle, XCircle, Loader2, ExternalLink } from 'lucide-react';
+import { Save, Eye, EyeOff, Copy, AlertTriangle, CheckCircle, XCircle, Loader2, ExternalLink, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../../../utils/api';
 
@@ -14,6 +14,11 @@ interface ManualConfigurationTabProps {
     whatsappWebhookVerifyToken?: string;
     whatsappWebhookUrl?: string;
     wabaLinkedVia?: string;
+    // Backend never echoes the (encrypted) secrets back. These flags tell us
+    // whether a value already exists in DB so the form can show a "Saved"
+    // indicator instead of a blank field that looks like the value was lost.
+    hasWhatsappAccessToken?: boolean;
+    hasWhatsappAppSecret?: boolean;
   };
   onSave: (data: any) => Promise<void>;
   loading: boolean;
@@ -31,6 +36,13 @@ export function ManualConfigurationTab({
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
+  // Whether each secret already lives in the DB. Drives the "Saved (Replace)"
+  // affordance — when true, the user doesn't need to re-paste to keep it.
+  const tokenAlreadySaved = !!settings.hasWhatsappAccessToken;
+  const secretAlreadySaved = !!settings.hasWhatsappAppSecret;
+  const [editingAccessToken, setEditingAccessToken] = useState(!tokenAlreadySaved);
+  const [editingAppSecret, setEditingAppSecret] = useState(!secretAlreadySaved);
+
   // Form state
   const [wabaId, setWabaId] = useState(settings.whatsappBusinessAccountId || '');
   const [phoneNumberId, setPhoneNumberId] = useState(settings.whatsappPhoneNumberId || '');
@@ -43,14 +55,16 @@ export function ManualConfigurationTab({
   // Generate webhook URL (read-only)
   const webhookUrl = `${window.location.origin}/api/v1/webhooks/whatsapp`;
 
-  // Load existing values (decrypted) when settings change
+  // Load existing values when settings change. Secrets are never echoed by the
+  // backend; we just sync the "is editing" toggles based on whether they exist.
   useEffect(() => {
     if (settings.whatsappBusinessAccountId) setWabaId(settings.whatsappBusinessAccountId);
     if (settings.whatsappPhoneNumberId) setPhoneNumberId(settings.whatsappPhoneNumberId);
     if (settings.whatsappAppId) setAppId(settings.whatsappAppId);
     if (settings.whatsappWebhookVerifyToken) setWebhookVerifyToken(settings.whatsappWebhookVerifyToken);
     if (settings.whatsappApiVersion) setApiVersion(settings.whatsappApiVersion);
-    // Access Token and App Secret are not loaded (security - user must re-enter)
+    setEditingAccessToken(!settings.hasWhatsappAccessToken);
+    setEditingAppSecret(!settings.hasWhatsappAppSecret);
   }, [settings]);
 
   // Validation functions
@@ -71,7 +85,12 @@ export function ManualConfigurationTab({
   };
 
   const validateAccessToken = (value: string): string | null => {
-    if (!value.trim()) return 'Access Token is required';
+    // If a token is already saved in DB and the user hasn't entered editing
+    // mode, the field is allowed to be blank — the backend will keep the
+    // existing value. Only enforce "required" when actively editing.
+    if (!value.trim()) {
+      return tokenAlreadySaved && !editingAccessToken ? null : 'Access Token is required';
+    }
     if (value.length < 50) {
       return 'Access Token appears to be invalid (too short)';
     }
@@ -79,7 +98,7 @@ export function ManualConfigurationTab({
   };
 
   const validateAppId = (value: string): string | null => {
-    if (!value.trim()) return 'App ID is required';
+    if (!value.trim()) return null;
     if (!/^\d{15,17}$/.test(value)) {
       return 'App ID must be 15-17 numeric digits';
     }
@@ -87,7 +106,7 @@ export function ManualConfigurationTab({
   };
 
   const validateAppSecret = (value: string): string | null => {
-    if (!value.trim()) return 'App Secret is required';
+    if (!value.trim()) return null;
     if (value.length < 32) {
       return 'App Secret appears to be invalid (too short)';
     }
@@ -321,54 +340,85 @@ export function ManualConfigurationTab({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Access Token <span className="text-red-500">*</span>
             </label>
-            <div className="flex gap-2">
-              <div className="flex-1 relative">
-                <input
-                  type={showAccessToken ? 'text' : 'password'}
-                  value={accessToken}
-                  onChange={(e) => {
-                    setAccessToken(e.target.value);
-                    setConnectionTestResult(null);
-                  }}
-                  placeholder="Enter your WhatsApp Access Token"
-                  className={`w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white pr-10 ${
-                    validateAccessToken(accessToken) ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-700'
-                  }`}
-                />
+            {tokenAlreadySaved && !editingAccessToken ? (
+              // "Saved" affordance — confirms the token persists across refreshes
+              // without re-displaying the secret. Click Replace to swap.
+              <div className="flex items-center justify-between gap-2 px-4 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-sm text-emerald-800 dark:text-emerald-200">
+                    Access token saved
+                    <span className="text-emerald-700/70 dark:text-emerald-300/70 ml-2 font-mono text-xs">
+                      ••••••••••••
+                    </span>
+                  </span>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setShowAccessToken(!showAccessToken)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
-                  title={showAccessToken ? 'Hide token' : 'Show token'}
+                  onClick={() => {
+                    setEditingAccessToken(true);
+                    setAccessToken('');
+                    setConnectionTestResult(null);
+                  }}
+                  className="text-xs font-medium text-emerald-700 dark:text-emerald-300 hover:underline"
                 >
-                  {showAccessToken ? (
-                    <EyeOff className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                  ) : (
-                    <Eye className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                  )}
+                  Replace
                 </button>
               </div>
-              <button
-                onClick={() => copyToClipboard(accessToken, 'Access Token')}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-                disabled={!accessToken}
-                title="Copy Access Token"
-              >
-                <Copy className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </button>
-            </div>
+            ) : (
+              <div className="flex gap-2">
+                <div className="flex-1 relative">
+                  <input
+                    type={showAccessToken ? 'text' : 'password'}
+                    value={accessToken}
+                    onChange={(e) => {
+                      setAccessToken(e.target.value);
+                      setConnectionTestResult(null);
+                    }}
+                    placeholder="Enter your WhatsApp Access Token"
+                    className={`w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white pr-10 ${
+                      validateAccessToken(accessToken) ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-700'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAccessToken(!showAccessToken)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
+                    title={showAccessToken ? 'Hide token' : 'Show token'}
+                  >
+                    {showAccessToken ? (
+                      <EyeOff className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                    ) : (
+                      <Eye className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                    )}
+                  </button>
+                </div>
+                {tokenAlreadySaved && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAccessToken(false);
+                      setAccessToken('');
+                    }}
+                    className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
             {validateAccessToken(accessToken) && (
               <p className="mt-1 text-xs text-red-600 dark:text-red-400">{validateAccessToken(accessToken)}</p>
             )}
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Your WhatsApp System User Access Token (will be encrypted when saved)
+              Your WhatsApp System User Access Token (encrypted at rest, never echoed back).
             </p>
           </div>
 
           {/* App ID */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              App ID <span className="text-red-500">*</span>
+              App ID <span className="text-gray-400">(optional)</span>
             </label>
             <div className="flex gap-2">
               <input
@@ -396,56 +446,85 @@ export function ManualConfigurationTab({
               <p className="mt-1 text-xs text-red-600 dark:text-red-400">{validateAppId(appId)}</p>
             )}
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Your Meta App ID (15-17 numeric digits)
+              Your Meta App ID (15-17 numeric digits). Only required for inbound webhook signature verification — leave blank if you only need to send messages.
             </p>
           </div>
 
           {/* App Secret */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              App Secret <span className="text-red-500">*</span>
+              App Secret <span className="text-gray-400">(optional)</span>
             </label>
-            <div className="flex gap-2">
-              <div className="flex-1 relative">
-                <input
-                  type={showAppSecret ? 'text' : 'password'}
-                  value={appSecret}
-                  onChange={(e) => {
-                    setAppSecret(e.target.value);
-                    setConnectionTestResult(null);
-                  }}
-                  placeholder="Enter your App Secret"
-                  className={`w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white pr-10 ${
-                    validateAppSecret(appSecret) ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-700'
-                  }`}
-                />
+            {secretAlreadySaved && !editingAppSecret ? (
+              <div className="flex items-center justify-between gap-2 px-4 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-sm text-emerald-800 dark:text-emerald-200">
+                    App secret saved
+                    <span className="text-emerald-700/70 dark:text-emerald-300/70 ml-2 font-mono text-xs">
+                      ••••••••••••
+                    </span>
+                  </span>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setShowAppSecret(!showAppSecret)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
-                  title={showAppSecret ? 'Hide secret' : 'Show secret'}
+                  onClick={() => {
+                    setEditingAppSecret(true);
+                    setAppSecret('');
+                    setConnectionTestResult(null);
+                  }}
+                  className="text-xs font-medium text-emerald-700 dark:text-emerald-300 hover:underline"
                 >
-                  {showAppSecret ? (
-                    <EyeOff className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                  ) : (
-                    <Eye className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                  )}
+                  Replace
                 </button>
               </div>
-              <button
-                onClick={() => copyToClipboard(appSecret, 'App Secret')}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-                disabled={!appSecret}
-                title="Copy App Secret"
-              >
-                <Copy className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </button>
-            </div>
+            ) : (
+              <div className="flex gap-2">
+                <div className="flex-1 relative">
+                  <input
+                    type={showAppSecret ? 'text' : 'password'}
+                    value={appSecret}
+                    onChange={(e) => {
+                      setAppSecret(e.target.value);
+                      setConnectionTestResult(null);
+                    }}
+                    placeholder="Enter your App Secret"
+                    className={`w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white pr-10 ${
+                      validateAppSecret(appSecret) ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-700'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAppSecret(!showAppSecret)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
+                    title={showAppSecret ? 'Hide secret' : 'Show secret'}
+                  >
+                    {showAppSecret ? (
+                      <EyeOff className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                    ) : (
+                      <Eye className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                    )}
+                  </button>
+                </div>
+                {secretAlreadySaved && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAppSecret(false);
+                      setAppSecret('');
+                    }}
+                    className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
             {validateAppSecret(appSecret) && (
               <p className="mt-1 text-xs text-red-600 dark:text-red-400">{validateAppSecret(appSecret)}</p>
             )}
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Your Meta App Secret (will be encrypted when saved)
+              Your Meta App Secret (will be encrypted when saved). Only required for inbound webhook signature verification — leave blank if you only need to send messages.
             </p>
           </div>
 
@@ -474,15 +553,65 @@ export function ManualConfigurationTab({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Webhook Verify Token
             </label>
-            <input
-              type="text"
-              value={webhookVerifyToken}
-              onChange={(e) => setWebhookVerifyToken(e.target.value)}
-              placeholder="Enter webhook verify token"
-              className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={webhookVerifyToken}
+                onChange={(e) => setWebhookVerifyToken(e.target.value)}
+                placeholder="Enter webhook verify token"
+                className="flex-1 px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  // Generate a 32-char hex token, prefixed with `wht_`. Uses
+                  // crypto.randomUUID where available, falls back to
+                  // crypto.getRandomValues, then to Math.random.
+                  const c: any = (typeof crypto !== 'undefined' ? crypto : null);
+                  let raw = '';
+                  if (c?.randomUUID) {
+                    raw = c.randomUUID().replace(/-/g, '');
+                  } else if (c?.getRandomValues) {
+                    const bytes = new Uint8Array(16);
+                    c.getRandomValues(bytes);
+                    raw = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+                  } else {
+                    raw = Array.from({ length: 32 }, () =>
+                      Math.floor(Math.random() * 16).toString(16)
+                    ).join('');
+                  }
+                  const token = `wht_${raw}`;
+                  setWebhookVerifyToken(token);
+                  navigator.clipboard.writeText(token).catch(() => {});
+                  toast.success('Verify token generated and copied', {
+                    description: 'Save credentials, then paste the same token into Meta App Dashboard.',
+                  });
+                }}
+                className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm"
+                title="Generate a secure random verify token"
+              >
+                <Sparkles className="w-4 h-4" />
+                Generate
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (webhookVerifyToken) {
+                    navigator.clipboard.writeText(webhookVerifyToken);
+                    toast.success('Verify token copied to clipboard');
+                  }
+                }}
+                disabled={!webhookVerifyToken}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors disabled:opacity-50"
+                title="Copy verify token"
+              >
+                <Copy className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              </button>
+            </div>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Token used to verify webhook requests from Meta
+              Click Generate for a secure random token. After saving, paste the
+              same value into Meta App Dashboard → WhatsApp → Configuration →
+              Verify Token.
             </p>
           </div>
 

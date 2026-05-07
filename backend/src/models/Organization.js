@@ -3,8 +3,8 @@ const sequelize = require('../config/database');
 
 const Organization = sequelize.define('organizations', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   name: {

@@ -1,4 +1,5 @@
 const templateService = require('../services/templateService');
+const templateSyncService = require('../services/templateSyncService');
 const excelExportService = require('../services/excelExportService');
 const { NotFoundError, AppError } = require('../utils/errorTypes');
 
@@ -144,6 +145,27 @@ class TemplateController {
       res.json({
         success: true,
         message: result.message || 'Template deleted successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Manually trigger a sync of WhatsApp templates from Meta for the caller's
+   * org. Returns inserted/updated/skipped counts. Used by the "Refresh from
+   * Meta" button on the Templates page.
+   */
+  async syncFromMeta(req, res, next) {
+    try {
+      const result = await templateSyncService.syncForOrg(req.organizationId);
+      if (result.error) {
+        return res.status(400).json({ success: false, error: { message: result.error }, data: result });
+      }
+      res.json({
+        success: true,
+        data: result,
+        message: `Synced ${result.inserted} new, ${result.updated} updated, ${result.skipped} skipped`,
       });
     } catch (error) {
       next(error);

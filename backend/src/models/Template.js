@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const Template = sequelize.define('templates', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   organizationId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'organization_id',
     references: {
@@ -17,7 +17,7 @@ const Template = sequelize.define('templates', {
     },
   },
   createdBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'created_by',
     references: {
@@ -44,6 +44,23 @@ const Template = sequelize.define('templates', {
   category: {
     type: DataTypes.ENUM('marketing', 'transactional', 'utility', 'authentication'),
     allowNull: false,
+  },
+  // Drives how submit-to-Meta and per-message component construction work.
+  // 'standard'   = traditional WhatsApp template (HEADER/BODY/FOOTER/BUTTONS)
+  // 'carousel'   = WhatsApp carousel template (BODY + CAROUSEL.cards[])
+  // 'limited_time' = future use; treated like 'standard' until wired
+  templateType: {
+    type: DataTypes.ENUM('standard', 'carousel', 'limited_time'),
+    allowNull: false,
+    defaultValue: 'standard',
+    field: 'template_type',
+  },
+  // Carousel cards. Shape per card:
+  //   { id: string, media: { type: 'image'|'video', url: string } | null,
+  //     content: string, buttons: [{ id, type, text, value }] }
+  cards: {
+    type: DataTypes.JSON,
+    allowNull: true,
   },
   language: {
     type: DataTypes.STRING(10),
@@ -101,7 +118,7 @@ const Template = sequelize.define('templates', {
     allowNull: false,
   },
   approvedBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'approved_by',
     references: {
       model: 'users',
@@ -113,7 +130,7 @@ const Template = sequelize.define('templates', {
     field: 'approved_at',
   },
   rejectedBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'rejected_by',
     references: {
       model: 'users',

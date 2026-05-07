@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const Media = sequelize.define('media', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   organizationId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'organization_id',
     references: {
@@ -17,7 +17,7 @@ const Media = sequelize.define('media', {
     },
   },
   uploadedBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'uploaded_by',
     references: {

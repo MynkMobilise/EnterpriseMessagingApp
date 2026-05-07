@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, Edit, MessageSquare, Trash2, FileText, MessageCircle, Smartphone, Filter, Copy, MoreVertical, Mail, Bell, CheckCircle, XCircle, Send, Clock, Upload, Download, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, Eye, Edit, MessageSquare, Trash2, FileText, MessageCircle, Smartphone, Filter, Copy, MoreVertical, Mail, Bell, CheckCircle, XCircle, Send, Clock, Upload, Download, X, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { sanitizeInput } from '../../utils/security';
 import { apiService } from '../../utils/api';
@@ -7,6 +8,8 @@ import { useOrganization } from '../../contexts/OrganizationContext';
 import { Pagination } from '../shared/Pagination';
 
 interface TemplatesProps {
+  // Optional callback overrides — kept for callers that don't go through React Router.
+  // When unset, the component uses useNavigate() directly.
   onNavigateToCreate?: () => void;
   onNavigateToEdit?: (templateId: number) => void;
 }
@@ -29,6 +32,9 @@ interface Template {
 }
 
 export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesProps) {
+  const navigate = useNavigate();
+  const goCreate = onNavigateToCreate || (() => navigate('/templates/new'));
+  const goEdit = onNavigateToEdit || ((id: number | string) => navigate(`/templates/${id}/edit`));
   const [searchQuery, setSearchQuery] = useState('');
   const [channelFilter, setChannelFilter] = useState<Channel>('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -46,6 +52,32 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
   const [importOptions, setImportOptions] = useState({ skipDuplicates: true, updateExisting: false });
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  // Pull the latest WhatsApp templates from Meta into the local DB. The
+  // background scheduler also does this every 15 min, but the button gives
+  // an instant refresh after creating/approving a template in Meta.
+  const handleSyncFromMeta = async () => {
+    setSyncing(true);
+    try {
+      const r = await apiService.templates.syncFromMeta();
+      if (r?.success) {
+        const d = r.data || {};
+        toast.success(r.message || 'Templates synced', {
+          description: `New: ${d.inserted || 0} • Updated: ${d.updated || 0} • Skipped: ${d.skipped || 0}`,
+        });
+        await refreshTemplates();
+      } else {
+        toast.error('Sync failed', { description: r?.error?.message || 'Unknown error' });
+      }
+    } catch (e: any) {
+      toast.error('Sync failed', {
+        description: e.response?.data?.error?.message || e.message,
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Fetch templates from API
   const { currentOrganization } = useOrganization();
@@ -66,6 +98,9 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
             category: template.category || 'transactional',
             content: template.body || template.htmlBody || template.plainTextBody || '',
             status: template.status || 'draft',
+            whatsappStatus: template.whatsappStatus || null,
+            whatsappRejectionReason: template.whatsappRejectionReason || template.rejectionReason || null,
+            whatsappTemplateId: template.whatsappTemplateId || null,
             variables: Array.isArray(template.variables) ? template.variables : [],
             language: template.language || 'en',
             type: template.type || 'text',
@@ -177,9 +212,16 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
 
   const handleSubmitForApproval = async (templateId: number) => {
     try {
+      const tpl = templates.find((t) => t.id === templateId);
       const response = await apiService.templates.submitForApproval(templateId.toString());
       if (response.success) {
-        toast.success('Template submitted for approval');
+        if (tpl?.channel === 'whatsapp') {
+          toast.success('Submitted to Meta for review', {
+            description: "Status will update automatically when Meta approves or rejects (usually within a few minutes).",
+          });
+        } else {
+          toast.success('Template submitted for approval');
+        }
         await refreshTemplates();
       } else {
         toast.error('Failed to submit template', {
@@ -400,7 +442,16 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
             {exporting ? 'Exporting...' : 'Export'}
           </button>
           <button
-            onClick={onNavigateToCreate}
+            onClick={handleSyncFromMeta}
+            disabled={syncing}
+            title="Pull latest WhatsApp templates from Meta. Runs automatically every 15 minutes."
+            className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Syncing…' : 'Refresh from Meta'}
+          </button>
+          <button
+            onClick={() => goCreate()}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm"
           >
             <Plus className="w-4 h-4" />
@@ -701,8 +752,13 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
                             ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'
                             : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300'
                         }`}
+                        title={template.status === 'rejected' && template.whatsappRejectionReason ? template.whatsappRejectionReason : undefined}
                       >
-                        {template.status === 'pending_approval' ? 'Pending' : template.status}
+                        {template.channel === 'whatsapp' && template.status === 'pending_approval'
+                          ? 'Awaiting Meta'
+                          : template.status === 'pending_approval'
+                          ? 'Pending'
+                          : template.status}
                       </span>
                     </td>
                     <td className="px-6 py-4">
@@ -728,8 +784,8 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
                           </button>
                         )}
                         
-                        {/* Approve (Pending Approval only) */}
-                        {template.status === 'pending_approval' && (
+                        {/* Approve (Pending Approval only — and only for non-WhatsApp channels; WhatsApp approval is owned by Meta and arrives via webhook) */}
+                        {template.status === 'pending_approval' && template.channel !== 'whatsapp' && (
                           <button
                             onClick={() => handleApprove(template.id)}
                             className="p-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
@@ -738,9 +794,9 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
                             <CheckCircle className="w-4 h-4" />
                           </button>
                         )}
-                        
-                        {/* Reject (Pending Approval only) */}
-                        {template.status === 'pending_approval' && (
+
+                        {/* Reject (Pending Approval only — and only for non-WhatsApp channels) */}
+                        {template.status === 'pending_approval' && template.channel !== 'whatsapp' && (
                           <button
                             onClick={() => handleReject(template.id)}
                             className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
@@ -758,13 +814,7 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
                           <Eye className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => {
-                            if (onNavigateToEdit) {
-                              onNavigateToEdit(template.id);
-                            } else {
-                              toast.info('Edit feature coming soon');
-                            }
-                          }}
+                          onClick={() => goEdit(template.id)}
                           className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
                           title="Edit"
                         >

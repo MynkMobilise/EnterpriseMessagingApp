@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const ContactGroupMembership = sequelize.define('contact_group_memberships', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   contactId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'contact_id',
     references: {
@@ -17,7 +17,7 @@ const ContactGroupMembership = sequelize.define('contact_group_memberships', {
     },
   },
   groupId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'group_id',
     references: {
@@ -26,7 +26,7 @@ const ContactGroupMembership = sequelize.define('contact_group_memberships', {
     },
   },
   addedBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'added_by',
     references: {
       model: 'users',

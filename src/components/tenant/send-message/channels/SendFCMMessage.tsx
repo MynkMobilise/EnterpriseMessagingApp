@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Send, Clock, DollarSign } from 'lucide-react';
+import { Send, Clock, DollarSign, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../../../utils/api';
 import { SendModeSelector } from '../SendModeSelector';
@@ -21,7 +21,7 @@ export function SendFCMMessage() {
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
 
-  const handleSend = async () => {
+  const handleSend = async (skipApproval: boolean) => {
     if (sendMode === 'single') {
       if (!fcmToken) {
         toast.error('Please enter an FCM token');
@@ -63,13 +63,20 @@ export function SendFCMMessage() {
           templateId: selectedTemplate,
           recipients: bulkRecipients,
           priority: 'normal',
+          skipApproval,
         });
 
         if (response.success) {
-          toast.success(`Bulk send initiated! ${bulkRecipients.length} messages queued`);
+          toast.success(
+            skipApproval
+              ? `Bulk send initiated! ${bulkRecipients.length} messages queued`
+              : `Bulk send submitted for approval (${bulkRecipients.length} messages)`
+          );
         }
       } else {
-        toast.loading('Sending notification...', { id: 'send-message' });
+        toast.loading(skipApproval ? 'Sending notification...' : 'Submitting for approval...', {
+          id: 'send-message',
+        });
 
         const messageData: MessageData = {
           channel: 'fcm',
@@ -77,6 +84,7 @@ export function SendFCMMessage() {
           recipientFcmToken: fcmToken,
           subject: notificationTitle,
           priority: 'normal',
+          skipApproval,
         };
 
         if (messageType === 'template') {
@@ -89,7 +97,10 @@ export function SendFCMMessage() {
         const response = await apiService.messages.send(messageData);
 
         if (response.success) {
-          toast.success('Notification sent successfully!', { id: 'send-message' });
+          toast.success(
+            skipApproval ? 'Notification sent successfully!' : 'Submitted for approval',
+            { id: 'send-message' }
+          );
           setFcmToken('');
           setNotificationTitle('');
           setTextMessage('');
@@ -228,14 +239,25 @@ export function SendFCMMessage() {
             </div>
           </div>
 
-          {/* Send Button */}
-          <button
-            onClick={handleSend}
-            className="w-full px-6 py-4 bg-orange-600 text-white rounded-xl hover:bg-orange-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-orange-600/20"
-          >
-            <Send className="w-5 h-5" />
-            {scheduleMessage ? 'Schedule Notification' : `Send ${sendMode === 'bulk' ? 'to All' : 'Notification'}`}
-          </button>
+          {/* Send Buttons — two parallel actions */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => handleSend(false)}
+              className="px-3 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 shadow-md text-sm"
+              title="Submit this notification for review by a manager"
+            >
+              <Send className="w-4 h-4" />
+              Send for Approval
+            </button>
+            <button
+              onClick={() => handleSend(true)}
+              className="px-3 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors flex items-center justify-center gap-2 shadow-md text-sm"
+              title="Approve and send immediately (requires approval permission)"
+            >
+              <CheckCircle className="w-4 h-4" />
+              Approve &amp; Send
+            </button>
+          </div>
         </div>
       </div>
     </div>

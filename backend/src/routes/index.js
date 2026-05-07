@@ -15,6 +15,8 @@ const contactGroupRoutes = require('./contactGroups');
 const emailConfigurationRoutes = require('./emailConfigurations');
 const smsConfigurationRoutes = require('./smsConfigurations');
 const migrationRoutes = require('./migration');
+const chatRoutes = require('./chat');
+const integrationRoutes = require('./integrations');
 
 const router = express.Router();
 
@@ -35,6 +37,8 @@ router.use('/media', mediaRoutes);
 router.use('/email-configurations', emailConfigurationRoutes);
 router.use('/sms-configurations', smsConfigurationRoutes);
 router.use('/migration', migrationRoutes);
+router.use('/chat', chatRoutes);
+router.use('/integrations', integrationRoutes);
 
 module.exports = router;
 

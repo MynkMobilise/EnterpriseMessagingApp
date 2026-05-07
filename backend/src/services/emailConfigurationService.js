@@ -95,12 +95,12 @@ class EmailConfigurationService {
       // Check if already encrypted (contains ':')
       if (encryptedPassword.includes(':')) {
         // Already encrypted, use as-is (might be from update)
-        console.log('SMTP password appears to be already encrypted, using as-is');
+        if (process.env.VERBOSE === 'true') console.log('SMTP password appears to be already encrypted, using as-is');
       } else {
         // Not encrypted, encrypt it
         try {
           encryptedPassword = encrypt(encryptedPassword);
-          console.log('SMTP password encrypted successfully');
+          if (process.env.VERBOSE === 'true') console.log('SMTP password encrypted successfully');
         } catch (error) {
           console.error('Failed to encrypt SMTP password:', error.message);
           // If encryption fails, store as plain text (not ideal but better than failing)
@@ -202,13 +202,13 @@ class EmailConfigurationService {
       // Check if already encrypted (contains ':')
       if (smtpPasswordEncrypted.includes(':')) {
         // Already encrypted, use as-is
-        console.log('SMTP password appears to be already encrypted during update, using as-is');
+        if (process.env.VERBOSE === 'true') console.log('SMTP password appears to be already encrypted during update, using as-is');
         updateData.smtpPasswordEncrypted = smtpPasswordEncrypted;
       } else {
         // Not encrypted, encrypt it
         try {
           updateData.smtpPasswordEncrypted = encrypt(smtpPasswordEncrypted);
-          console.log('SMTP password encrypted successfully during update');
+          if (process.env.VERBOSE === 'true') console.log('SMTP password encrypted successfully during update');
         } catch (error) {
           console.error('Failed to encrypt SMTP password:', error.message);
           // If encryption fails, store as plain text

@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const BulkMessageBatch = sequelize.define('bulk_message_batches', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   organizationId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'organization_id',
     references: {
@@ -17,7 +17,7 @@ const BulkMessageBatch = sequelize.define('bulk_message_batches', {
     },
   },
   createdBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'created_by',
     references: {
@@ -29,7 +29,7 @@ const BulkMessageBatch = sequelize.define('bulk_message_batches', {
     type: DataTypes.STRING(255),
   },
   templateId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'template_id',
     references: {
       model: 'templates',

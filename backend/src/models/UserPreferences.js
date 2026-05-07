@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const UserPreferences = sequelize.define('user_preferences', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   userId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     unique: true,
     field: 'user_id',

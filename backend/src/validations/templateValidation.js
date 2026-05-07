@@ -1,10 +1,38 @@
 const Joi = require('joi');
 
+// Carousel card shape: matches the frontend CarouselCard interface.
+//   - `id` is a stable client-generated handle (timestamp+counter).
+//   - `media.url` may be an empty string for cards whose image was wiped by
+//     a Meta sync (Meta doesn't echo back our public URL). The frontend
+//     normalizes empty-URL media to null before send, but the backend stays
+//     lenient so a stale row in the DB doesn't lock the user out of saving.
+//   - `content` may be empty during draft saves; the submit-to-Meta path
+//     re-validates non-emptiness when actually submitting.
+const carouselCardSchema = Joi.object({
+  id: Joi.string().required(),
+  media: Joi.object({
+    type: Joi.string().valid('image', 'video').required(),
+    url: Joi.string().allow('').required(),
+  }).allow(null),
+  content: Joi.string().allow('').required(),
+  buttons: Joi.array()
+    .items(Joi.object({
+      id: Joi.string(),
+      type: Joi.string().valid('url', 'phone', 'quick_reply'),
+      text: Joi.string().allow(''),
+      value: Joi.string().allow(''),
+    }))
+    .max(2)
+    .default([]),
+});
+
 const templateValidation = {
   create: Joi.object({
     name: Joi.string().required(),
     channel: Joi.string().valid('whatsapp', 'sms', 'email', 'fcm', 'both').required(),
     category: Joi.string().valid('marketing', 'transactional', 'utility', 'authentication').required(),
+    templateType: Joi.string().valid('standard', 'carousel', 'limited_time').default('standard'),
+    cards: Joi.array().items(carouselCardSchema).max(10).optional(),
     body: Joi.string().when('channel', {
       is: Joi.string().valid('email', 'fcm'),
       then: Joi.optional(),
@@ -39,6 +67,8 @@ const templateValidation = {
 
   update: Joi.object({
     name: Joi.string().optional(),
+    templateType: Joi.string().valid('standard', 'carousel', 'limited_time').optional(),
+    cards: Joi.array().items(carouselCardSchema).max(10).optional(),
     body: Joi.string().optional(),
     htmlBody: Joi.string().optional(),
     plainTextBody: Joi.string().optional(),

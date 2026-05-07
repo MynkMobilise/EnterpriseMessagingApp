@@ -579,6 +579,7 @@ export function UserManagement() {
       {showCreateModal && (
         <CreateUserModal
           organizations={organizations}
+          currentOrganizationId={currentOrganization?.id}
           onClose={() => setShowCreateModal(false)}
           onSubmit={handleCreateUser}
         />
@@ -609,19 +610,25 @@ export function UserManagement() {
 // Create User Modal Component
 function CreateUserModal({
   organizations,
+  currentOrganizationId,
   onClose,
   onSubmit,
 }: {
   organizations: any[];
+  currentOrganizationId?: string | number;
   onClose: () => void;
   onSubmit: (data: CreateUserPayload) => void;
 }) {
+  // Pin to the active org (tenant admins only have one; super-admins switching
+  // into a tenant via the org-switcher act in that tenant). Falls back to
+  // organizations[0] if no current is provided so the form never breaks.
+  const initialOrgId = currentOrganizationId ?? organizations[0]?.id ?? '';
   const [formData, setFormData] = useState<CreateUserPayload>({
     email: '',
     firstName: '',
     lastName: '',
     role: 'operator',
-    organizationId: organizations[0]?.id || '',
+    organizationId: initialOrgId as any,
     phoneNumber: '',
     department: '',
     jobTitle: '',
@@ -670,20 +677,23 @@ function CreateUserModal({
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
-              Email Address *
-            </label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
-              placeholder="john.doe@company.com"
-            />
-          </div>
-
+          {/* Email + Phone share a row now that the Organization field is
+              implicit. Keeps the form symmetrical (every row has 2 columns
+              on md+) instead of leaving Phone alone in a half-empty row. */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
+                Email Address *
+              </label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                placeholder="john.doe@company.com"
+              />
+            </div>
+
             <div>
               <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
                 Phone Number
@@ -695,23 +705,6 @@ function CreateUserModal({
                 className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
                 placeholder="+1 (555) 000-0000"
               />
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
-                Organization *
-              </label>
-              <select
-                value={formData.organizationId}
-                onChange={(e) => setFormData({ ...formData, organizationId: e.target.value })}
-                className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
-              >
-                {organizations.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name}
-                  </option>
-                ))}
-              </select>
             </div>
           </div>
 

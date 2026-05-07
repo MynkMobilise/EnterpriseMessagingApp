@@ -3,9 +3,10 @@ const fs = require('fs');
 const path = require('path');
 
 // Only load .env file in development/local environments
-// In production (Render), use environment variables from Render dashboard only
+// In production (Render), use environment variables from Render dashboard only.
+// Use an absolute path so the .env loads regardless of which directory `node` was run from.
 if (process.env.NODE_ENV !== 'production') {
-  require('dotenv').config();
+  require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 }
 
 // #region agent log
@@ -13,7 +14,7 @@ if (process.env.NODE_ENV !== 'production') {
 const envPath = path.join(__dirname, '../../.env');
 const envExists = fs.existsSync(envPath);
 const logData1 = {location:'database.js:10',message:'Environment check',data:{envPath,envExists,NODE_ENV:process.env.NODE_ENV,dotenvLoaded:process.env.NODE_ENV !== 'production'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'};
-console.log('[DEBUG]', JSON.stringify(logData1));
+if (process.env.DB_DEBUG === 'true') console.log('[DEBUG]', JSON.stringify(logData1));
 fetch('http://127.0.0.1:7242/ingest/ad4dae2f-f59c-4af9-b389-01e1fbb979dc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logData1)}).catch(()=>{});
 // #endregion agent log
 
@@ -36,7 +37,7 @@ const envVars = {
   NODE_ENV: process.env.NODE_ENV,
 };
 const logData2 = {location:'database.js:32',message:'Environment variables before config',data:envVars,timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'};
-console.log('[DEBUG]', JSON.stringify(logData2));
+if (process.env.DB_DEBUG === 'true') console.log('[DEBUG]', JSON.stringify(logData2));
 fetch('http://127.0.0.1:7242/ingest/ad4dae2f-f59c-4af9-b389-01e1fbb979dc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logData2)}).catch(()=>{});
 // #endregion agent log
 
@@ -50,21 +51,25 @@ const dbConfig = {
   port: parseInt(process.env.MYSQLPORT || process.env.MYSQL_PORT || process.env.DB_PORT || 3306),
 };
 
-// Validate database configuration - all required fields must be set
-if (!dbConfig.host || !dbConfig.database || !dbConfig.username || !dbConfig.password) {
+// Validate database configuration. Password is optional for local MySQL setups
+// (XAMPP/MAMP/WAMP, where root often has no password). The DB driver itself
+// will reject auth on the first query if the password is wrong, which is the
+// right place to surface that error.
+if (!dbConfig.host || !dbConfig.database || !dbConfig.username) {
   const missing = [];
   if (!dbConfig.host) missing.push('host');
   if (!dbConfig.database) missing.push('database');
   if (!dbConfig.username) missing.push('username');
-  if (!dbConfig.password) missing.push('password');
-  
+
   const errorMsg = `❌ Database configuration incomplete. Missing: ${missing.join(', ')}. ` +
     `Please set Railway variables (MYSQLHOST, MYSQLDATABASE, MYSQLUSER, MYSQLPASSWORD) or ` +
-    `custom variables (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD) in Render environment variables.`;
-  
+    `custom variables (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD) in your environment.`;
+
   console.error(errorMsg);
   throw new Error(errorMsg);
 }
+// Normalize empty/undefined password to empty string so mysql2 doesn't choke.
+if (!dbConfig.password) dbConfig.password = '';
 
 // #region agent log
 // Log final dbConfig values (mask password)
@@ -77,7 +82,7 @@ const dbConfigLog = {
   allUndefined: !dbConfig.database && !dbConfig.username && !dbConfig.password && !dbConfig.host,
 };
 const logData3 = {location:'database.js:55',message:'Final dbConfig values',data:dbConfigLog,timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'};
-console.log('[DEBUG]', JSON.stringify(logData3));
+if (process.env.DB_DEBUG === 'true') console.log('[DEBUG]', JSON.stringify(logData3));
 fetch('http://127.0.0.1:7242/ingest/ad4dae2f-f59c-4af9-b389-01e1fbb979dc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logData3)}).catch(()=>{});
 // #endregion agent log
 
@@ -95,7 +100,10 @@ const sequelize = new Sequelize(
       acquire: 30000,
       idle: 10000,
     },
-    logging: process.env.NODE_ENV === 'development' ? console.log : false,
+    // SQL query logging — off by default in every env to keep the console
+    // readable. Set DB_DEBUG=true in .env to bring it back when you actually
+    // need to diagnose a query.
+    logging: process.env.DB_DEBUG === 'true' ? console.log : false,
     timezone: '+00:00',
     define: {
       charset: 'utf8mb4',
@@ -119,7 +127,7 @@ const testConnection = async () => {
       username: dbConfig.username,
     };
     const logData4 = {location:'database.js:96',message:'Attempting database connection',data:connectionConfig,timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'};
-    console.log('[DEBUG]', JSON.stringify(logData4));
+    if (process.env.DB_DEBUG === 'true') console.log('[DEBUG]', JSON.stringify(logData4));
     fetch('http://127.0.0.1:7242/ingest/ad4dae2f-f59c-4af9-b389-01e1fbb979dc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logData4)}).catch(()=>{});
     // #endregion agent log
     
@@ -128,16 +136,16 @@ const testConnection = async () => {
     // #region agent log
     // Log successful connection
     const logData5 = {location:'database.js:107',message:'Database connection successful',data:{host:dbConfig.host,port:dbConfig.port,database:dbConfig.database},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'};
-    console.log('[DEBUG]', JSON.stringify(logData5));
+    if (process.env.DB_DEBUG === 'true') console.log('[DEBUG]', JSON.stringify(logData5));
     fetch('http://127.0.0.1:7242/ingest/ad4dae2f-f59c-4af9-b389-01e1fbb979dc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logData5)}).catch(()=>{});
     // #endregion agent log
     
-    console.log('✅ MySQL connection established successfully');
+    // Connection success is reported by server.js startup banner; no log here.
   } catch (error) {
     // #region agent log
     // Log connection error with details
     const logData6 = {location:'database.js:114',message:'Database connection failed',data:{error:error.message,code:error.code,host:dbConfig.host,port:dbConfig.port},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'};
-    console.log('[DEBUG]', JSON.stringify(logData6));
+    if (process.env.DB_DEBUG === 'true') console.log('[DEBUG]', JSON.stringify(logData6));
     fetch('http://127.0.0.1:7242/ingest/ad4dae2f-f59c-4af9-b389-01e1fbb979dc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logData6)}).catch(()=>{});
     // #endregion agent log
     

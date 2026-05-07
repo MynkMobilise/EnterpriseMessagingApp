@@ -1,6 +1,7 @@
 const { User, Organization } = require('../models');
 const { AppError, AuthenticationError, AuthorizationError } = require('../utils/errorTypes');
 const { verifyAccessToken } = require('../config/jwt');
+const authService = require('../services/authService');
 
 /**
  * Authenticate user via JWT token
@@ -37,25 +38,37 @@ const authenticate = async (req, res, next) => {
       throw new AppError('User account is not active', 403);
     }
 
-    // Get permissions from user object
-    const permissions = user.permissions || {};
+    // Merge user-stored permissions with the role's defaults so newly added
+    // permission keys (e.g. `canViewLiveChat`) automatically apply to users
+    // whose stored permissions JSON predates the change. Per-user overrides
+    // (set by an admin) still win because user.permissions spreads last.
+    const roleDefaults = authService.getDefaultPermissions(user.role);
+    const permissions = { ...roleDefaults, ...(user.permissions || {}) };
 
     // Store original user organization ID for reference
     const userOrganizationId = user.organizationId;
 
-    // Check for X-Organization-Id header for organization switching
-    const headerOrgId = req.headers['x-organization-id'] || req.headers['X-Organization-Id'];
-    
+    // Check for X-Organization-Id header for organization switching.
+    //
+    // After the UUID→INT migration, user.organizationId is a number while
+    // HTTP headers are always strings. Compare loosely AND normalize the
+    // resolved value to a number so downstream Sequelize queries don't get
+    // string-vs-int confusion in WHERE clauses.
+    const headerOrgIdRaw = req.headers['x-organization-id'] || req.headers['X-Organization-Id'];
+    const headerOrgId = headerOrgIdRaw ? Number(headerOrgIdRaw) : null;
+
     let resolvedOrganizationId = userOrganizationId;
 
     if (headerOrgId) {
-      // If user is super_admin, allow switching to any organization
+      if (Number.isNaN(headerOrgId)) {
+        return next(new AuthorizationError('Invalid organization id'));
+      }
+      // super_admin can switch to any organization
       if (user.role === 'super_admin') {
         resolvedOrganizationId = headerOrgId;
       } else {
         // Regular users can only access their own organization
-        // Validate that the header organization ID matches user's organization
-        if (headerOrgId !== userOrganizationId) {
+        if (headerOrgId !== Number(userOrganizationId)) {
           return next(new AuthorizationError('Cannot access this organization'));
         }
         resolvedOrganizationId = headerOrgId;

@@ -47,6 +47,12 @@ router.post('/logout',
   authController.logout
 );
 
+// Tenant SSO: partner portals POST { orgSlug, token } where token is a JWT
+// signed with that org's sso_secret. Returns access + refresh tokens.
+router.post('/sso/exchange',
+  authController.ssoExchange
+);
+
 // Protected routes
 router.get('/me',
   authenticate,

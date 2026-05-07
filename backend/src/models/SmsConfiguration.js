@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const SmsConfiguration = sequelize.define('sms_configurations', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   organizationId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'organization_id',
     references: {

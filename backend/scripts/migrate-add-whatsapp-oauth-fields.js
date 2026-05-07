@@ -48,13 +48,15 @@ async function addWhatsAppOAuthFields() {
 
     console.log('Creating whatsapp_oauth_states table...');
 
-    // Create whatsapp_oauth_states table
+    // Create whatsapp_oauth_states table.
+    // PKs and FK targets are INT auto_increment after the int-pk refactor —
+    // matching column types here is required for the FK constraint to attach.
     await sequelize.query(`
       CREATE TABLE IF NOT EXISTS whatsapp_oauth_states (
-        id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin PRIMARY KEY,
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         state VARCHAR(255) NOT NULL UNIQUE,
-        organization_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
-        user_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+        organization_id INT NOT NULL,
+        user_id INT NOT NULL,
         expires_at DATETIME NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_state (state),

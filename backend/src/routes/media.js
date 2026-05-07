@@ -5,8 +5,16 @@ const { validate } = require('../middleware/validation');
 const { mediaValidation } = require('../validations/mediaValidation');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 
 const router = express.Router();
+
+// Multer's diskStorage doesn't create missing directories — pre-create them at
+// module load so the very first upload on a fresh checkout doesn't ENOENT.
+const tempDir = path.join(process.cwd(), 'uploads', 'temp');
+const mediaDir = path.join(process.cwd(), 'uploads', 'media');
+fs.mkdirSync(tempDir, { recursive: true });
+fs.mkdirSync(mediaDir, { recursive: true });
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({

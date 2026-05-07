@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const MessageEvent = sequelize.define('message_events', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   messageId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'message_id',
     references: {

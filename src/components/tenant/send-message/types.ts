@@ -36,5 +36,6 @@ export interface MessageData {
   smsProvider?: string;
   priority?: 'low' | 'normal' | 'high' | 'urgent';
   scheduledFor?: string;
+  skipApproval?: boolean;
 }
 

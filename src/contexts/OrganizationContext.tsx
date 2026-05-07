@@ -7,12 +7,20 @@ export interface Organization {
   slug: string;
   logo?: string;
   industry?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  address?: string;
+  description?: string;
   plan: 'free' | 'starter' | 'professional' | 'enterprise';
   status: 'active' | 'suspended' | 'trial';
   createdAt: string;
   messageQuota: number;
   usedMessages: number;
   userCount?: number;
+  // Backwards-compat alias for the backend's snake_case field name
+  maxMessagesPerMonth?: number;
+  maxUsers?: number;
   settings?: {
     timezone?: string;
     currency?: string;
@@ -51,10 +59,17 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
           slug: org.slug,
           logo: org.logoUrl,
           industry: org.industry || '',
+          email: org.email || '',
+          phone: org.phone || '',
+          website: org.website || '',
+          address: org.address || '',
+          description: org.description || '',
           plan: org.plan || 'starter',
           status: org.status || 'active',
           createdAt: org.createdAt,
           messageQuota: org.maxMessagesPerMonth || 10000,
+          maxMessagesPerMonth: org.maxMessagesPerMonth || 10000,
+          maxUsers: org.maxUsers || 10,
           usedMessages: org.usedMessages || 0,
           userCount: org.userCount || 0,
           settings: org.settings || {},
@@ -116,14 +131,22 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
 
   const addOrganization = async (orgData: Partial<Organization>) => {
     try {
-      const response = await apiService.organizations.create({
+      // Forward every field the modal collects, including email / phone / website.
+      // Email is required by the backend — the welcome email + initial admin
+      // login go to that address.
+      const payload: any = {
         name: orgData.name || '',
         industry: orgData.industry || '',
         plan: orgData.plan || 'starter',
         status: orgData.status || 'active',
-        maxMessagesPerMonth: orgData.messageQuota || 10000,
-        maxUsers: 10, // Default
-      });
+        maxMessagesPerMonth: (orgData as any).messageQuota || (orgData as any).maxMessagesPerMonth || 10000,
+        maxUsers: (orgData as any).userCount || (orgData as any).maxUsers || 10,
+      };
+      if ((orgData as any).email) payload.email = (orgData as any).email;
+      if ((orgData as any).phone) payload.phone = (orgData as any).phone;
+      if ((orgData as any).website) payload.website = (orgData as any).website;
+
+      const response = await apiService.organizations.create(payload);
       
       if (response.success && response.data) {
         const newOrg: Organization = {
@@ -157,13 +180,25 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
 
   const updateOrganization = async (orgId: string, updates: Partial<Organization>) => {
     try {
+      // Forward every editable field. Previously this dropped email/phone/website/
+      // address/description, which silently broke updates for those fields.
+      const u = updates as any;
       const updateData: any = {};
-      if (updates.name !== undefined) updateData.name = updates.name;
-      if (updates.industry !== undefined) updateData.industry = updates.industry;
-      if (updates.plan !== undefined) updateData.plan = updates.plan;
-      if (updates.status !== undefined) updateData.status = updates.status;
-      if (updates.messageQuota !== undefined) updateData.maxMessagesPerMonth = updates.messageQuota;
-      
+      if (u.name !== undefined) updateData.name = u.name;
+      if (u.industry !== undefined) updateData.industry = u.industry;
+      if (u.plan !== undefined) updateData.plan = u.plan;
+      if (u.status !== undefined) updateData.status = u.status;
+      if (u.email !== undefined) updateData.email = u.email;
+      if (u.phone !== undefined) updateData.phone = u.phone;
+      if (u.website !== undefined) updateData.website = u.website;
+      if (u.address !== undefined) updateData.address = u.address;
+      if (u.description !== undefined) updateData.description = u.description;
+      if (u.messageQuota !== undefined) updateData.maxMessagesPerMonth = u.messageQuota;
+      if (u.maxMessagesPerMonth !== undefined) updateData.maxMessagesPerMonth = u.maxMessagesPerMonth;
+      if (u.userCount !== undefined) updateData.maxUsers = u.userCount;
+      if (u.maxUsers !== undefined) updateData.maxUsers = u.maxUsers;
+      if (u.settings !== undefined) updateData.settings = u.settings;
+
       const response = await apiService.organizations.update(orgId, updateData);
       
       if (response.success && response.data) {

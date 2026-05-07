@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const ApiKey = sequelize.define('api_keys', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   organizationId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'organization_id',
     references: {
@@ -17,7 +17,7 @@ const ApiKey = sequelize.define('api_keys', {
     },
   },
   createdBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'created_by',
     references: {
@@ -109,7 +109,7 @@ const ApiKey = sequelize.define('api_keys', {
     field: 'revoked_at',
   },
   revokedBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'revoked_by',
     references: {
       model: 'users',

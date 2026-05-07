@@ -15,16 +15,19 @@ async function migrate() {
   try {
     console.log('Starting migration: Add sms_template_id to templates table...');
 
-    // Check if column already exists
-    const [results] = await sequelize.query(`
-      SELECT COLUMN_NAME 
-      FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_SCHEMA = DATABASE() 
-      AND TABLE_NAME = 'templates' 
+    // Check if column already exists. With QueryTypes.SELECT sequelize.query
+    // returns the rows array directly (not a [rows, metadata] tuple) — the
+    // previous `const [results]` destructure grabbed only the first row,
+    // which is why this script kept hitting "Duplicate column name".
+    const rows = await sequelize.query(`
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'templates'
       AND COLUMN_NAME = 'sms_template_id'
     `, { type: QueryTypes.SELECT });
 
-    if (results && results.length > 0) {
+    if (rows.length > 0) {
       console.log('✓ Column sms_template_id already exists. Migration skipped.');
       process.exit(0);
     }

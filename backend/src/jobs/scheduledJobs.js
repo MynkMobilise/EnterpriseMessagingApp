@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { Message, Session, MessageEvent, ApiKeyUsageLog } = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../utils/logger');
+const templateSyncService = require('../services/templateSyncService');
 
 /**
  * Cleanup expired sessions
@@ -78,6 +79,22 @@ const updateExpiredApprovals = async () => {
 };
 
 /**
+ * Sync WhatsApp message templates from Meta for every configured org.
+ * Runs every 15 minutes — picks up new APPROVED templates without users
+ * having to click anything.
+ */
+const syncWhatsAppTemplates = async () => {
+  try {
+    const r = await templateSyncService.syncForAllConfiguredOrgs();
+    if (r.inserted || r.updated || r.errors) {
+      logger.info(`Template sync: ${r.orgsProcessed} orgs, +${r.inserted} new, ~${r.updated} updated, ${r.errors} errors`);
+    }
+  } catch (error) {
+    logger.error('Template sync (scheduled) failed:', error);
+  }
+};
+
+/**
  * Initialize scheduled jobs
  */
 const initializeScheduledJobs = () => {
@@ -92,6 +109,9 @@ const initializeScheduledJobs = () => {
 
   // Update expired approvals - every hour
   cron.schedule('0 * * * *', updateExpiredApprovals);
+
+  // Sync WhatsApp templates from Meta - every 15 minutes
+  cron.schedule('*/15 * * * *', syncWhatsAppTemplates);
 
   logger.info('Scheduled jobs initialized');
 };

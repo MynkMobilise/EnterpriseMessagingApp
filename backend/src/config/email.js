@@ -13,8 +13,10 @@ const createTransporter = (config = {}) => {
     console.warn(`[SMTP] Missing credentials: user=${user ? 'set' : 'missing'}, pass=${pass ? 'set' : 'missing'}`);
   }
 
-  // Log configuration (without password) for debugging
-  console.log(`Creating SMTP transporter: host=${host}, port=${port}, user=${user ? '***' : 'not set'}, pass=${pass ? '***' : 'not set'}`);
+  // Log configuration (without password) for debugging — only when SMTP_DEBUG=true
+  if (process.env.SMTP_DEBUG === 'true') {
+    console.log(`Creating SMTP transporter: host=${host}, port=${port}, user=${user ? '***' : 'not set'}, pass=${pass ? '***' : 'not set'}`);
+  }
 
   // Determine secure settings based on port and config
   // Port 465 = direct SSL/TLS (secure: true)
@@ -74,8 +76,9 @@ const createTransporter = (config = {}) => {
     console.warn(`[SMTP] WARNING: Certificate verification is disabled for ${host}:${port}. This is a security risk!`);
   }
 
-  // Log TLS configuration for debugging
-  if (process.env.NODE_ENV === 'development') {
+  // Log TLS configuration for debugging — gated behind SMTP_DEBUG to keep
+  // normal startup quiet.
+  if (process.env.SMTP_DEBUG === 'true') {
     console.log(`[SMTP] TLS config: rejectUnauthorized=${transporterConfig.tls.rejectUnauthorized}`);
   }
 
@@ -125,8 +128,24 @@ const sendEmail = async ({
 }) => {
   try {
     let transporterToUse = transporter;
-    let fromAddress = from || process.env.EMAIL_FROM || 'noreply@yourcompany.com';
-    
+    const rawFrom = from || process.env.EMAIL_FROM || 'noreply@yourcompany.com';
+    const smtpUserAddr = smtpUsername || process.env.SMTP_USER || '';
+
+    // Normalize the From header to a valid RFC 5322 address.
+    //   "noreply@x.com"          -> use as is
+    //   "Suchna Management"      -> just a display name, wrap with SMTP_USER:
+    //                               "Suchna Management <testsmtp@mobilisepro.com>"
+    //   "Display <a@b.com>"      -> use as is
+    let fromAddress;
+    if (rawFrom.includes('@')) {
+      fromAddress = rawFrom;
+    } else if (smtpUserAddr.includes('@')) {
+      fromAddress = `${rawFrom} <${smtpUserAddr}>`;
+    } else {
+      // Last-resort fallback so we never send a header without an @.
+      fromAddress = `${rawFrom} <noreply@localhost>`;
+    }
+
     // If custom SMTP config provided, create new transporter
     // Always create new transporter if any SMTP config is provided
     if (smtpHost || smtpPort !== undefined || smtpUsername || smtpPassword) {
@@ -140,8 +159,8 @@ const sendEmail = async ({
       });
     }
 
-    // Format from address with name if provided
-    if (fromName) {
+    // If a separate fromName is provided AND fromAddress is a bare email, wrap it.
+    if (fromName && fromAddress.includes('@') && !fromAddress.includes('<')) {
       fromAddress = `${fromName} <${fromAddress}>`;
     }
 
@@ -346,12 +365,84 @@ const sendLoginCredentialsEmail = async (to, email, temporaryPassword, organizat
   });
 };
 
+/**
+ * Welcome email sent when a new organization is created.
+ * Includes login URL, the org slug (so they know what to type into the slug
+ * field), the admin email, and an optional initial password.
+ */
+const sendWelcomeOrganizationEmail = async ({ to, organizationName, organizationSlug, adminEmail, adminPassword, loginUrl }) => {
+  const safeLoginUrl = loginUrl || process.env.FRONTEND_URL?.split(',')[0] || 'http://localhost:3000';
+  const passwordBlock = adminPassword
+    ? `<p style="margin: 0 0 8px 0; color: #111827;"><strong style="color: #111827;">Initial password:</strong> <code style="background-color:#f3f4f6;padding:2px 6px;border-radius:4px;color:#111827">${adminPassword}</code></p>
+       <p style="font-size:13px;color:#6b7280;margin:0 0 16px 0">Please change this password on first login.</p>`
+    : '';
+
+  // Email-client-safe HTML:
+  //   - Always set a solid bgcolor BEFORE gradient (gradients are stripped by
+  //     Gmail / Outlook / Apple Mail; without a fallback the white text on
+  //     also-white background becomes invisible).
+  //   - Use <table> for the hero/button blocks (Outlook respects table bgcolor
+  //     where it ignores div backgrounds).
+  //   - Avoid relying on `border-radius` for legibility — it's purely visual.
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #111827; background-color: #ffffff;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #2563eb; border-radius: 12px; margin: 0 0 24px 0;">
+        <tr>
+          <td bgcolor="#2563eb" align="center" style="background-color: #2563eb; background-image: linear-gradient(135deg, #2563eb 0%, #4f46e5 50%, #7c3aed 100%); border-radius: 12px; padding: 32px; color: #ffffff; text-align: center;">
+            <h1 style="margin: 0 0 8px 0; font-size: 24px; color: #ffffff;">Welcome to ${organizationName} &#127881;</h1>
+            <p style="margin: 0; font-size: 14px; color: #dbeafe;">Your messaging workspace is ready</p>
+          </td>
+        </tr>
+      </table>
+
+      <p style="font-size: 16px; line-height: 1.6; margin: 0 0 16px 0; color: #111827;">Your organization has been provisioned. Use the credentials below to sign in:</p>
+
+      <div style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px; margin: 0 0 24px 0;">
+        <p style="margin: 0 0 8px 0; color: #111827;"><strong style="color: #111827;">Organization slug:</strong> <code style="background-color:#ffffff;padding:2px 6px;border-radius:4px;border:1px solid #e5e7eb;color:#111827">${organizationSlug}</code></p>
+        <p style="margin: 0 0 8px 0; color: #111827;"><strong style="color: #111827;">Admin email:</strong> ${adminEmail}</p>
+        ${passwordBlock}
+      </div>
+
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 24px 0;">
+        <tr>
+          <td align="center">
+            <a href="${safeLoginUrl}" style="display: inline-block; background-color: #2563eb; background-image: linear-gradient(90deg, #2563eb, #7c3aed); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; mso-padding-alt: 0;">
+              <span style="color: #ffffff;">Sign in to your dashboard</span>
+            </a>
+          </td>
+        </tr>
+      </table>
+
+      <p style="font-size: 13px; color: #6b7280; text-align: center; margin: 0;">
+        Need help? Reply to this email and our team will get back to you.
+      </p>
+    </div>
+  `;
+
+  const text = `Welcome to ${organizationName}!
+
+Your organization has been provisioned.
+  Organization slug: ${organizationSlug}
+  Admin email: ${adminEmail}${adminPassword ? `\n  Initial password: ${adminPassword}\n  (please change on first login)` : ''}
+
+Sign in: ${safeLoginUrl}
+`;
+
+  return sendEmail({
+    to,
+    subject: `Welcome to ${organizationName} — your workspace is ready`,
+    text,
+    html,
+  });
+};
+
 module.exports = {
   transporter,
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendLoginCredentialsEmail,
+  sendWelcomeOrganizationEmail,
 };
 
 

@@ -1,6 +1,7 @@
 const { Message, BulkMessageBatch, MessageEvent, Template, Contact, Organization, sequelize } = require('../models');
 const { NotFoundError, AppError } = require('../utils/errorTypes');
 const { getPaginationMeta } = require('../utils/helpers');
+const { normalizePhone } = require('../utils/phoneNumber');
 const { Op } = require('sequelize');
 
 class MessageService {
@@ -25,6 +26,14 @@ class MessageService {
       skipApproval, // Flag to bypass approval (for test messages)
       emailConfigurationId, // Specific email configuration to use for testing
     } = data;
+
+    // Normalize the customer phone to digits-only so the same physical
+    // customer always lands in one row-bucket — needed for live-chat
+    // conversation grouping (inbound webhook arrives as `9199...` while
+    // operator-typed values often have `+91` and spaces).
+    if ((channel === 'whatsapp' || channel === 'sms') && recipientPhone) {
+      recipientPhone = normalizePhone(recipientPhone);
+    }
 
     // Get organization settings to check approval requirements
     const settingsService = require('./settingsService');
@@ -219,7 +228,7 @@ class MessageService {
    * Send bulk messages
    */
   async sendBulk(organizationId, sentBy, data) {
-    const { name, channel, templateId, recipients, priority, scheduledFor, subject } = data;
+    const { name, channel, templateId, recipients, priority, scheduledFor, subject, skipApproval } = data;
 
     // Validate template
     const template = await Template.findOne({
@@ -252,6 +261,7 @@ class MessageService {
         variables: recipient.variables || {},
         priority,
         scheduledFor,
+        skipApproval,
       };
 
       // Add channel-specific recipient field

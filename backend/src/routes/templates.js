@@ -44,6 +44,12 @@ router.get('/export',
   templateController.exportTemplates
 );
 
+// Sync WhatsApp templates from Meta on demand
+router.post('/sync-from-meta',
+  requirePermission('canManageTemplates'),
+  templateController.syncFromMeta
+);
+
 // Specific routes must come before parameterized routes
 router.post('/:id/submit',
   requirePermission('canManageTemplates'),

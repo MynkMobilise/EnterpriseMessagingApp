@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Send, Clock, DollarSign } from 'lucide-react';
+import { Send, Clock, DollarSign, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../../../utils/api';
 import { useOrganization } from '../../../../contexts/OrganizationContext';
@@ -45,7 +45,7 @@ export function SendSMSMessage() {
     fetchSmsProviders();
   }, [currentOrganization?.id]);
 
-  const handleSend = async () => {
+  const handleSend = async (skipApproval: boolean) => {
     if (!selectedSmsProvider) {
       toast.error('Please select an SMS provider');
       return;
@@ -88,13 +88,20 @@ export function SendSMSMessage() {
           templateId: selectedTemplate,
           recipients: bulkRecipients,
           priority: 'normal',
+          skipApproval,
         });
 
         if (response.success) {
-          toast.success(`Bulk send initiated! ${bulkRecipients.length} messages queued`);
+          toast.success(
+            skipApproval
+              ? `Bulk send initiated! ${bulkRecipients.length} messages queued`
+              : `Bulk send submitted for approval (${bulkRecipients.length} messages)`
+          );
         }
       } else {
-        toast.loading('Sending message...', { id: 'send-message' });
+        toast.loading(skipApproval ? 'Sending message...' : 'Submitting for approval...', {
+          id: 'send-message',
+        });
 
         const messageData: MessageData = {
           channel: 'sms',
@@ -102,6 +109,7 @@ export function SendSMSMessage() {
           recipientPhone: phoneNumber,
           smsProvider: selectedSmsProvider,
           priority: 'normal',
+          skipApproval,
         };
 
         if (messageType === 'template') {
@@ -114,7 +122,10 @@ export function SendSMSMessage() {
         const response = await apiService.messages.send(messageData);
 
         if (response.success) {
-          toast.success('Message sent successfully!', { id: 'send-message' });
+          toast.success(
+            skipApproval ? 'Message sent successfully!' : 'Submitted for approval',
+            { id: 'send-message' }
+          );
           setPhoneNumber('');
           setTextMessage('');
           setSelectedTemplate('');
@@ -253,14 +264,25 @@ export function SendSMSMessage() {
             </div>
           </div>
 
-          {/* Send Button */}
-          <button
-            onClick={handleSend}
-            className="w-full px-6 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
-          >
-            <Send className="w-5 h-5" />
-            {scheduleMessage ? 'Schedule Message' : `Send ${sendMode === 'bulk' ? 'to All' : 'Message'}`}
-          </button>
+          {/* Send Buttons — two parallel actions */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => handleSend(false)}
+              className="px-3 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 shadow-md text-sm"
+              title="Submit this message for review by a manager"
+            >
+              <Send className="w-4 h-4" />
+              Send for Approval
+            </button>
+            <button
+              onClick={() => handleSend(true)}
+              className="px-3 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors flex items-center justify-center gap-2 shadow-md text-sm"
+              title="Approve and send immediately (requires approval permission)"
+            >
+              <CheckCircle className="w-4 h-4" />
+              Approve &amp; Send
+            </button>
+          </div>
         </div>
       </div>
     </div>

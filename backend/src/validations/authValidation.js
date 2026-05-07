@@ -19,7 +19,9 @@ const authValidation = {
   login: Joi.object({
     email: Joi.string().email().required(),
     password: Joi.string().required(),
-    organizationSlug: Joi.string().required(),
+    // Optional: only needed to disambiguate when the same email is registered
+    // with multiple organizations.
+    organizationSlug: Joi.string().allow('', null).optional(),
   }),
 
   refreshToken: Joi.object({

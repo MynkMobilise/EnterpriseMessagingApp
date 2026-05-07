@@ -1,4 +1,5 @@
 const authService = require('../services/authService');
+const ssoService = require('../services/ssoService');
 const { AppError } = require('../utils/errorTypes');
 
 class AuthController {
@@ -163,10 +164,16 @@ class AuthController {
   async getCurrentUser(req, res, next) {
     try {
       const user = authService.sanitizeUser(req.user);
+      // Include the organization (id, name, slug, plan) so the frontend chrome
+      // can display the tenant name + role-gate UI without an extra fetch.
+      const { Organization } = require('../models');
+      const org = await Organization.findByPk(req.user.organizationId, {
+        attributes: ['id', 'name', 'slug', 'plan', 'status', 'industry'],
+      });
 
       res.json({
         success: true,
-        data: user,
+        data: { ...user, organization: org ? org.toJSON() : null },
       });
     } catch (error) {
       next(error);
@@ -291,6 +298,26 @@ class AuthController {
         data: result,
         message: 'Rate limits have been reset',
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * SSO token exchange — partner portals POST a JWT signed with the org's
+   * sso_secret; we verify it and return our own access + refresh tokens.
+   */
+  async ssoExchange(req, res, next) {
+    try {
+      const { orgSlug, organizationSlug, token } = req.body;
+      const slug = orgSlug || organizationSlug;
+      const result = await ssoService.exchange({
+        orgSlug: slug,
+        token,
+        ipAddress: req.ip || req.connection.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      });
+      res.json({ success: true, data: result });
     } catch (error) {
       next(error);
     }

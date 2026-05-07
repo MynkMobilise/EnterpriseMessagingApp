@@ -130,6 +130,18 @@ export const apiService = {
       return response.data;
     },
 
+    // Exchange a partner-signed JWT for our tokens. Persists tokens on success.
+    ssoExchange: async (data: { orgSlug: string; token: string }) => {
+      const response = await api.post('/auth/sso/exchange', data);
+      const payload = response.data?.data;
+      if (response.data?.success && payload?.tokens?.accessToken) {
+        localStorage.setItem('accessToken', payload.tokens.accessToken);
+        if (payload.tokens.refreshToken) localStorage.setItem('refreshToken', payload.tokens.refreshToken);
+        if (payload.user?.organizationId) localStorage.setItem('organizationId', payload.user.organizationId);
+      }
+      return response.data;
+    },
+
     getCurrentUser: async () => {
       const response = await api.get('/auth/me');
       return response.data;
@@ -260,6 +272,11 @@ export const apiService = {
 
     submitForApproval: async (id: string) => {
       const response = await api.post(`/templates/${id}/submit`);
+      return response.data;
+    },
+
+    syncFromMeta: async () => {
+      const response = await api.post('/templates/sync-from-meta');
       return response.data;
     },
 
@@ -471,6 +488,18 @@ export const apiService = {
       const response = await api.post('/settings/test-whatsapp-connection', credentials);
       return response.data;
     },
+    getSso: async () => {
+      const response = await api.get('/settings/sso');
+      return response.data;
+    },
+    updateSso: async (data: { ssoEnabled?: boolean; ssoDefaultRole?: string }) => {
+      const response = await api.put('/settings/sso', data);
+      return response.data;
+    },
+    rotateSsoSecret: async () => {
+      const response = await api.post('/settings/sso/rotate');
+      return response.data;
+    },
   },
   emailConfigurations: {
     list: async () => {
@@ -602,12 +631,21 @@ export const apiService = {
       const response = await api.get(`/media/${id}`);
       return response.data;
     },
-    upload: async (file: File) => {
+    upload: async (
+      file: File,
+      onProgress?: (percent: number) => void,
+    ) => {
       const formData = new FormData();
       formData.append('file', file);
       const response = await api.post('/media', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (e: any) => {
+          if (onProgress && e.total) {
+            const percent = Math.round((e.loaded * 100) / e.total);
+            onProgress(percent);
+          }
         },
       });
       return response.data;
@@ -665,6 +703,32 @@ export const apiService = {
   },
   getCurrentUser: async () => {
     return api.get('/auth/me');
+  },
+
+  chat: {
+    listConversations: async (params?: { search?: string; page?: number; limit?: number }) => {
+      const r = await api.get('/chat/conversations', { params });
+      return r.data;
+    },
+    getThread: async (phone: string, params?: { before?: string; limit?: number }) => {
+      const r = await api.get(`/chat/conversations/${encodeURIComponent(phone)}/messages`, { params });
+      return r.data;
+    },
+    sendReply: async (
+      phone: string,
+      body: { text?: string; templateId?: number | string; variables?: Record<string, string> }
+    ) => {
+      const r = await api.post(`/chat/conversations/${encodeURIComponent(phone)}/messages`, body);
+      return r.data;
+    },
+    markRead: async (phone: string) => {
+      const r = await api.post(`/chat/conversations/${encodeURIComponent(phone)}/read`);
+      return r.data;
+    },
+    webhookStatus: async () => {
+      const r = await api.get('/chat/webhook-status');
+      return r.data;
+    },
   },
 };
 

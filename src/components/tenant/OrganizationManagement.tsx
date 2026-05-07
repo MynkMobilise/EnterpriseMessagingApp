@@ -513,43 +513,61 @@ function OrganizationModal({
   onClose: () => void;
   onSave: (data: Partial<Organization>) => void;
 }) {
+  // The "User Count" field is meant to set the org's *max-users* cap, not
+  // display the current count of users. Initialize from `maxUsers` (the cap)
+  // so editing doesn't get clobbered with whatever count happens to be there.
   const [formData, setFormData] = useState({
     name: organization?.name || '',
+    email: (organization as any)?.email || '',
     industry: organization?.industry || '',
     plan: organization?.plan || 'starter',
     status: organization?.status || 'active',
-    messageQuota: organization?.messageQuota || 10000,
-    userCount: organization?.userCount || 1,
+    messageQuota: (organization as any)?.maxMessagesPerMonth || organization?.messageQuota || 10000,
+    userCount: (organization as any)?.maxUsers || 10,
   });
 
-  // Update form data when organization changes (for edit mode)
   useEffect(() => {
     if (organization && isEdit) {
       setFormData({
         name: organization.name || '',
+        email: (organization as any).email || '',
         industry: organization.industry || '',
         plan: organization.plan || 'starter',
         status: organization.status || 'active',
-        messageQuota: organization.messageQuota || 10000,
-        userCount: organization.userCount || 1,
+        messageQuota: (organization as any).maxMessagesPerMonth || organization.messageQuota || 10000,
+        userCount: (organization as any).maxUsers || 10,
       });
     }
   }, [organization, isEdit]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const validate = () => {
     if (!formData.name || !formData.industry) {
       toast.error('Name and industry are required');
-      return;
+      return false;
     }
+    if (!isEdit) {
+      // Email is required only on create — that's where the welcome email gets sent
+      // and the initial admin user is provisioned.
+      if (!formData.email) {
+        toast.error('Contact email is required — the welcome email and initial admin login go here.');
+        return false;
+      }
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(formData.email)) {
+        toast.error('Please enter a valid email address');
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate()) return;
     onSave(formData);
   };
 
   const handleSaveClick = () => {
-    if (!formData.name || !formData.industry) {
-      toast.error('Name and industry are required');
-      return;
-    }
+    if (!validate()) return;
     onSave(formData);
   };
 
@@ -603,6 +621,24 @@ function OrganizationModal({
               />
             </div>
 
+            <div className="md:col-span-2">
+              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
+                Contact Email {!isEdit && <span className="text-red-600">*</span>}
+              </label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                placeholder="admin@company.com"
+                className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+              />
+              {!isEdit && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Welcome email + initial admin login credentials will be sent here. The admin will be forced to change the password on first login.
+                </p>
+              )}
+            </div>
+
             <div>
               <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">Plan</label>
               <select
@@ -646,16 +682,20 @@ function OrganizationModal({
 
             <div>
               <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
-                User Count
+                Max Users
               </label>
               <input
                 type="number"
+                min={1}
                 value={formData.userCount}
                 onChange={(e) =>
-                  setFormData({ ...formData, userCount: parseInt(e.target.value) })
+                  setFormData({ ...formData, userCount: parseInt(e.target.value) || 1 })
                 }
                 className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Maximum number of users this organization can have.
+              </p>
             </div>
           </div>
         </form>

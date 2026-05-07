@@ -57,10 +57,12 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Organization-Id'],
 }));
 
-// Logging
-if (process.env.NODE_ENV === 'development') {
+// HTTP request logging — off by default. Set HTTP_DEBUG=true to see one log
+// line per request (morgan 'dev' format), or LOG_LEVEL=info for the structured
+// 'combined' format. Errors are always reported via the error handler.
+if (process.env.HTTP_DEBUG === 'true') {
   app.use(morgan('dev'));
-} else {
+} else if (process.env.NODE_ENV === 'production' && process.env.LOG_LEVEL === 'info') {
   app.use(morgan('combined'));
 }
 

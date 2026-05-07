@@ -4,14 +4,20 @@ const { NotFoundError } = require('../utils/errorTypes');
 
 class MessageController {
   /**
-   * Send single message
+   * Send single message.
+   * `skipApproval` only honored if the caller has `canApproveMessages`; otherwise
+   * silently coerced to false so the message goes through normal approval.
    */
   async send(req, res, next) {
     try {
+      const body = { ...req.body };
+      if (body.skipApproval && !req.userPermissions?.canApproveMessages) {
+        body.skipApproval = false;
+      }
       const message = await messageService.send(
         req.organizationId,
         req.user.id,
-        req.body
+        body
       );
       res.status(201).json({
         success: true,
@@ -30,15 +36,21 @@ class MessageController {
    */
   async sendBulk(req, res, next) {
     try {
+      const body = { ...req.body };
+      if (body.skipApproval && !req.userPermissions?.canApproveMessages) {
+        body.skipApproval = false;
+      }
       const result = await messageService.sendBulk(
         req.organizationId,
         req.user.id,
-        req.body
+        body
       );
       res.status(201).json({
         success: true,
         data: result,
-        message: 'Bulk messages queued for processing',
+        message: body.skipApproval
+          ? 'Bulk messages queued for sending'
+          : 'Bulk messages submitted for approval',
       });
     } catch (error) {
       next(error);

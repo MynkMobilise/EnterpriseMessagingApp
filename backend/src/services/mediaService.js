@@ -54,7 +54,7 @@ class MediaService {
     // Generate unique filename
     const ext = path.extname(file.originalname);
     const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(7)}${ext}`;
-    const storageDir = path.join(process.cwd(), 'uploads', 'media', organizationId);
+    const storageDir = path.join(process.cwd(), 'uploads', 'media', String(organizationId));
     await fs.mkdir(storageDir, { recursive: true });
     const storagePath = path.join(storageDir, uniqueName);
 

@@ -1,9 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
-import { Upload, Image as ImageIcon, FileText, Video, Trash2, Download, X, Edit2, Search, Filter, HardDrive, File, Image, Eye } from 'lucide-react';
+import { Upload, Image as ImageIcon, FileText, Video, Trash2, Download, X, Edit2, Search, Filter, HardDrive, File, Image, Eye, CheckSquare, Square } from 'lucide-react';
 import { toast } from 'sonner';
+import JSZip from 'jszip';
 import { apiService } from '../../utils/api';
 import { useOrganization } from '../../contexts/OrganizationContext';
 import { Pagination } from '../shared/Pagination';
+
+type UploadItem = {
+  id: string;             // local key — random, not the server id
+  file: File;
+  status: 'pending' | 'uploading' | 'done' | 'error';
+  progress: number;       // 0..100
+  error?: string;
+};
 
 interface MediaItem {
   id: string;
@@ -47,6 +56,11 @@ export function MediaLibrary() {
   });
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
+  const [dragActive, setDragActive] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -215,38 +229,176 @@ export function MediaLibrary() {
     }
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const MAX_SIZE = 16 * 1024 * 1024;
+  const makeQueueId = () => Math.random().toString(36).slice(2);
 
-    // Validate file size (16MB)
-    const maxSize = 16 * 1024 * 1024;
-    if (file.size > maxSize) {
-      toast.error('File too large', {
-        description: 'Maximum file size is 16MB',
-      });
-      return;
+  // Validate + enqueue + run uploads in parallel.
+  // Files larger than MAX_SIZE are added to the queue with status='error' so the
+  // user can see *why* a file was rejected instead of having it silently dropped.
+  const enqueueAndUpload = async (files: File[]) => {
+    if (files.length === 0) return;
+
+    const initial: UploadItem[] = files.map((file) => {
+      const id = makeQueueId();
+      if (file.size > MAX_SIZE) {
+        return { id, file, status: 'error', progress: 0, error: 'Exceeds 16MB' };
+      }
+      return { id, file, status: 'pending', progress: 0 };
+    });
+
+    setUploadQueue((q) => [...q, ...initial]);
+    setUploading(true);
+
+    const updateItem = (id: string, patch: Partial<UploadItem>) =>
+      setUploadQueue((q) => q.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+
+    const uploadable = initial.filter((it) => it.status === 'pending');
+    const results = await Promise.allSettled(
+      uploadable.map(async (it) => {
+        updateItem(it.id, { status: 'uploading', progress: 0 });
+        try {
+          const r = await apiService.media.upload(it.file, (percent) => {
+            updateItem(it.id, { progress: percent });
+          });
+          if (r.success) {
+            updateItem(it.id, { status: 'done', progress: 100 });
+            return true;
+          }
+          updateItem(it.id, { status: 'error', error: r.error?.message || 'Upload failed' });
+          return false;
+        } catch (e: any) {
+          updateItem(it.id, {
+            status: 'error',
+            error: e.response?.data?.error?.message || e.message || 'Upload failed',
+          });
+          return false;
+        }
+      })
+    );
+
+    const successCount = results.filter((r) => r.status === 'fulfilled' && r.value).length;
+    const failCount = uploadable.length - successCount;
+    const rejectedForSize = initial.length - uploadable.length;
+
+    if (successCount > 0) toast.success(`${successCount} file${successCount > 1 ? 's' : ''} uploaded`);
+    if (failCount > 0) toast.error(`${failCount} file${failCount > 1 ? 's' : ''} failed to upload`);
+    if (rejectedForSize > 0) {
+      toast.error(`${rejectedForSize} file${rejectedForSize > 1 ? 's' : ''} skipped (over 16MB limit)`);
     }
 
-    setUploading(true);
+    fetchMediaItems();
+    fetchStats();
+    setUploading(false);
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = event.target.files;
+    if (!fileList || fileList.length === 0) return;
+    await enqueueAndUpload(Array.from(fileList));
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // Drag handlers — wired on the upload modal's drop zone
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(true);
+  };
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(true);
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+  };
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    const dropped = Array.from(e.dataTransfer.files || []);
+    if (dropped.length === 0) return;
+    await enqueueAndUpload(dropped);
+  };
+
+  // ---- Bulk selection ---------------------------------------------------
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllVisible = () => {
+    setSelectedIds(new Set(filteredItems.map((m) => m.id)));
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (!confirm(`Delete ${ids.length} file${ids.length > 1 ? 's' : ''}? This cannot be undone.`)) return;
+
+    setBulkDeleting(true);
+    let success = 0;
+    let failure = 0;
+    // Sequential — keeps server load predictable; small sets so latency is fine.
+    for (const id of ids) {
+      try {
+        const r = await apiService.media.delete(id);
+        if (r.success) success++;
+        else failure++;
+      } catch {
+        failure++;
+      }
+    }
+
+    if (success > 0) toast.success(`${success} file${success > 1 ? 's' : ''} deleted`);
+    if (failure > 0) toast.error(`${failure} file${failure > 1 ? 's' : ''} could not be deleted`);
+
+    clearSelection();
+    setBulkDeleting(false);
+    fetchMediaItems();
+    fetchStats();
+  };
+
+  const handleBulkDownload = async () => {
+    const items = filteredItems.filter((m) => selectedIds.has(m.id));
+    if (items.length === 0) return;
+
+    setBulkDownloading(true);
     try {
-      const response = await apiService.media.upload(file);
-      if (response.success) {
-        toast.success('Media uploaded successfully');
-        setShowUploadModal(false);
-        fetchMediaItems();
-        fetchStats();
-      }
-    } catch (error: any) {
-      console.error('Failed to upload media:', error);
-      toast.error('Failed to upload media', {
-        description: error.response?.data?.error?.message || error.message,
-      });
+      const zip = new JSZip();
+      // Fetch in parallel — most browsers cap concurrency at ~6 per origin which
+      // is fine; for very large selections this would warrant a worker.
+      await Promise.all(
+        items.map(async (m) => {
+          const resp = await fetch(getMediaUrl(m));
+          if (!resp.ok) throw new Error(`Fetch failed for ${m.name}`);
+          const blob = await resp.blob();
+          zip.file(m.originalName || m.name, blob);
+        })
+      );
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `media-${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success(`Downloaded ${items.length} file${items.length > 1 ? 's' : ''} as zip`);
+    } catch (e: any) {
+      toast.error('Bulk download failed', { description: e.message });
     } finally {
-      setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      setBulkDownloading(false);
     }
   };
 
@@ -407,6 +559,48 @@ export function MediaLibrary() {
         </div>
       </div>
 
+      {/* Bulk-action toolbar — appears when at least one card is selected */}
+      {selectedIds.size > 0 && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3">
+          <div className="flex items-center gap-3 text-sm">
+            <CheckSquare className="w-5 h-5 text-blue-600" />
+            <span className="text-blue-900 dark:text-blue-100">
+              {selectedIds.size} selected
+            </span>
+            <button
+              onClick={selectAllVisible}
+              className="text-blue-700 dark:text-blue-300 hover:underline"
+            >
+              Select all on page
+            </button>
+            <button
+              onClick={clearSelection}
+              className="text-blue-700 dark:text-blue-300 hover:underline"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleBulkDownload}
+              disabled={bulkDownloading}
+              className="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" />
+              {bulkDownloading ? 'Zipping…' : 'Download zip'}
+            </button>
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4" />
+              {bulkDeleting ? 'Deleting…' : 'Delete selected'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Media Grid */}
       {loading ? (
         <div className="text-center py-12">
@@ -430,7 +624,7 @@ export function MediaLibrary() {
               className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden hover:shadow-lg hover:shadow-gray-200/50 dark:hover:shadow-gray-900/50 transition-all"
             >
               {/* Preview */}
-              <div 
+              <div
                 className="relative aspect-square bg-gray-100 dark:bg-gray-800 flex items-center justify-center overflow-hidden cursor-pointer group"
                 onClick={() => {
                   setViewingMedia(media);
@@ -442,6 +636,28 @@ export function MediaLibrary() {
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors pointer-events-none flex items-center justify-center">
                   <Eye className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
+
+                {/* Selection checkbox — visible on hover, persistent when checked.
+                    Stops propagation so clicks don't open the view modal. */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleSelect(media.id);
+                  }}
+                  aria-label={selectedIds.has(media.id) ? 'Deselect' : 'Select'}
+                  className={`absolute top-2 left-2 z-10 p-1 rounded-md backdrop-blur-sm transition-opacity ${
+                    selectedIds.has(media.id)
+                      ? 'opacity-100 bg-blue-600 text-white'
+                      : 'opacity-0 group-hover:opacity-100 bg-white/80 dark:bg-gray-900/80 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-900'
+                  }`}
+                >
+                  {selectedIds.has(media.id) ? (
+                    <CheckSquare className="w-5 h-5" />
+                  ) : (
+                    <Square className="w-5 h-5" />
+                  )}
+                </button>
               </div>
 
               {/* Info */}
@@ -517,61 +733,121 @@ export function MediaLibrary() {
         </ul>
       </div>
 
-      {/* Upload Modal */}
+      {/* Upload Modal — multi-file + drag-drop + per-file progress */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl w-full max-w-lg">
+          <div className="bg-white dark:bg-gray-900 rounded-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
               <h2 className="text-xl text-gray-900 dark:text-white">Upload Media</h2>
               <button
-                onClick={() => setShowUploadModal(false)}
+                onClick={() => {
+                  setShowUploadModal(false);
+                  // Drop completed/errored items so the next open starts fresh
+                  setUploadQueue([]);
+                }}
                 className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5 text-gray-600 dark:text-gray-400" />
               </button>
             </div>
 
-            <div className="p-6">
+            <div className="p-6 overflow-y-auto flex-1">
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*,video/*,application/pdf,audio/*"
+                multiple
                 onChange={handleFileSelect}
                 className="hidden"
                 id="file-upload"
               />
               <label
                 htmlFor="file-upload"
-                className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-12 text-center cursor-pointer hover:border-blue-500 dark:hover:border-blue-500 transition-colors block"
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-colors block ${
+                  dragActive
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                    : 'border-gray-300 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-500'
+                }`}
               >
-                <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <Upload className={`w-12 h-12 mx-auto mb-4 ${dragActive ? 'text-blue-600' : 'text-gray-400'}`} />
                 <p className="text-gray-600 dark:text-gray-400 mb-2">
-                  Click to upload or drag and drop
+                  {dragActive ? 'Drop to upload' : 'Click to upload or drag and drop'}
                 </p>
                 <p className="text-xs text-gray-500">
-                  JPG, PNG, PDF, MP4, Audio up to 16MB
+                  JPG, PNG, PDF, MP4, Audio up to 16MB — multiple files OK
                 </p>
               </label>
-              {uploading && (
-                <div className="mt-4 text-center">
-                  <p className="text-sm text-blue-600">Uploading...</p>
+
+              {/* Per-file progress list */}
+              {uploadQueue.length > 0 && (
+                <div className="mt-6 space-y-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs uppercase tracking-wider text-gray-500">Upload queue</p>
+                    {!uploading && (
+                      <button
+                        onClick={() => setUploadQueue([])}
+                        className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                      >
+                        Clear list
+                      </button>
+                    )}
+                  </div>
+                  {uploadQueue.map((item) => (
+                    <div
+                      key={item.id}
+                      className="border border-gray-200 dark:border-gray-800 rounded-lg p-3"
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-sm text-gray-900 dark:text-white truncate flex-1 mr-3" title={item.file.name}>
+                          {item.file.name}
+                        </span>
+                        <span className="text-xs text-gray-500 flex-shrink-0">
+                          {formatFileSize(item.file.size)}
+                        </span>
+                      </div>
+                      {item.status === 'error' ? (
+                        <p className="text-xs text-red-600 dark:text-red-400">{item.error}</p>
+                      ) : item.status === 'done' ? (
+                        <p className="text-xs text-green-600 dark:text-green-400">Uploaded ✓</p>
+                      ) : (
+                        <>
+                          <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-blue-600 transition-all"
+                              style={{ width: `${item.progress}%` }}
+                            />
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {item.status === 'pending' ? 'Waiting…' : `${item.progress}%`}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
 
             <div className="p-6 border-t border-gray-200 dark:border-gray-800 flex gap-3">
               <button
-                onClick={() => setShowUploadModal(false)}
+                onClick={() => {
+                  setShowUploadModal(false);
+                  setUploadQueue([]);
+                }}
                 className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
               >
-                Cancel
+                {uploading ? 'Close (uploads continue)' : 'Done'}
               </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {uploading ? 'Uploading...' : 'Select File'}
+                {uploading ? 'Uploading…' : 'Select Files'}
               </button>
             </div>
           </div>

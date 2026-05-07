@@ -14,7 +14,7 @@ const migrate = require('../../scripts/migrate-add-processing-status-railway');
  */
 router.post('/add-processing-status', async (req, res) => {
   try {
-    console.log('Starting migration: Add processing status to delivery_status ENUM');
+    if (process.env.VERBOSE === 'true') console.log('Starting migration: Add processing status to delivery_status ENUM');
     await migrate();
     res.json({ 
       success: true, 

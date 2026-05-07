@@ -6,7 +6,7 @@ const contactGroupValidation = {
       name: Joi.string().required().max(255),
       description: Joi.string().allow(null, '').optional(),
       color: Joi.string().pattern(/^#[0-9A-Fa-f]{6}$/).optional(),
-      contactIds: Joi.array().items(Joi.string().uuid()).optional(),
+      contactIds: Joi.array().items(Joi.number().integer().positive()).optional(),
     }),
   },
 
@@ -20,13 +20,13 @@ const contactGroupValidation = {
 
   addContacts: {
     body: Joi.object({
-      contactIds: Joi.array().items(Joi.string().uuid()).min(1).required(),
+      contactIds: Joi.array().items(Joi.number().integer().positive()).min(1).required(),
     }),
   },
 
   removeContacts: {
     body: Joi.object({
-      contactIds: Joi.array().items(Joi.string().uuid()).min(1).required(),
+      contactIds: Joi.array().items(Joi.number().integer().positive()).min(1).required(),
     }),
   },
 };

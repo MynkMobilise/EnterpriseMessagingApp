@@ -4,12 +4,12 @@ const bcrypt = require('bcrypt');
 
 const User = sequelize.define('users', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   organizationId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'organization_id',
     references: {
@@ -48,6 +48,19 @@ const User = sequelize.define('users', {
     type: DataTypes.ENUM('active', 'inactive', 'suspended', 'pending'),
     defaultValue: 'pending',
     allowNull: false,
+  },
+  // 'local' = traditional email+password. 'sso' = JIT-provisioned via partner SSO;
+  // these users cannot password-login (passwordHash should be NULL).
+  authProvider: {
+    type: DataTypes.ENUM('local', 'sso'),
+    defaultValue: 'local',
+    allowNull: false,
+    field: 'auth_provider',
+  },
+  lastSsoLoginAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    field: 'last_sso_login_at',
   },
   phoneNumber: {
     type: DataTypes.STRING(50),

@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const TemplateVersion = sequelize.define('template_versions', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   templateId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'template_id',
     references: {
@@ -32,7 +32,7 @@ const TemplateVersion = sequelize.define('template_versions', {
     type: DataTypes.JSON,
   },
   changedBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'changed_by',
     references: {
       model: 'users',

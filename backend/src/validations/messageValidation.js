@@ -30,7 +30,7 @@ const messageValidation = {
       then: Joi.optional(),
       otherwise: Joi.optional(),
     }),
-    templateId: Joi.string().uuid().when('messageType', {
+    templateId: Joi.number().integer().positive().when('messageType', {
       is: 'template',
       then: Joi.required(),
     }),
@@ -41,12 +41,16 @@ const messageValidation = {
     priority: Joi.string().valid('low', 'normal', 'high', 'urgent').optional(),
     scheduledFor: Joi.date().optional(),
     category: Joi.string().optional(),
+    // Operators with canApproveMessages can opt to bypass the org's approval
+    // gate ("Approve & Send"). The controller enforces the permission check —
+    // the schema just allows the field through.
+    skipApproval: Joi.boolean().optional(),
   }),
 
   sendBulk: Joi.object({
     name: Joi.string().optional(),
     channel: Joi.string().valid('whatsapp', 'sms', 'email', 'fcm').required(),
-    templateId: Joi.string().uuid().required(),
+    templateId: Joi.number().integer().positive().required(),
     recipients: Joi.array().items(
       Joi.object({
         phone: Joi.string().when('..channel', {
@@ -70,6 +74,7 @@ const messageValidation = {
     ).min(1).max(1000).required(),
     priority: Joi.string().valid('low', 'normal', 'high', 'urgent').optional(),
     scheduledFor: Joi.date().optional(),
+    skipApproval: Joi.boolean().optional(),
   }),
 
   reject: Joi.object({
@@ -77,7 +82,7 @@ const messageValidation = {
   }),
 
   bulkApprove: Joi.object({
-    messageIds: Joi.array().items(Joi.string().uuid()).optional(),
+    messageIds: Joi.array().items(Joi.number().integer().positive()).optional(),
     approveAllPending: Joi.boolean().optional(),
   }),
 };

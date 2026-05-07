@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const OrganizationSettings = sequelize.define('organization_settings', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   organizationId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     unique: true,
     field: 'organization_id',
@@ -70,7 +70,7 @@ const OrganizationSettings = sequelize.define('organization_settings', {
     field: 'waba_linked_at',
   },
   wabaLinkedBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'waba_linked_by',
     references: {
       model: 'users',
@@ -156,6 +156,25 @@ const OrganizationSettings = sequelize.define('organization_settings', {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
     field: 'two_factor_required',
+  },
+  // SSO — see migrate-add-sso-fields.js. The encrypted secret is what partner
+  // portals (e.g. Sparsh) use to sign JWTs that this app trusts.
+  ssoEnabled: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+    field: 'sso_enabled',
+  },
+  ssoSecretEncrypted: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    field: 'sso_secret_encrypted',
+  },
+  ssoDefaultRole: {
+    type: DataTypes.STRING(50),
+    allowNull: false,
+    defaultValue: 'operator',
+    field: 'sso_default_role',
   },
   passwordExpiryDays: {
     type: DataTypes.INTEGER,

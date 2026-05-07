@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
-import { MessageSquare, Smartphone, Shield, Bell, Building, Mail } from 'lucide-react';
+import { MessageSquare, Smartphone, Shield, Bell, Building, Mail, KeyRound } from 'lucide-react';
 import { WhatsAppSettings } from './settings/WhatsAppSettings';
 import { SMSSettings } from './settings/SMSSettings';
 import { EmailSettings } from './settings/EmailSettings';
 import { FCMSettings } from './settings/FCMSettings';
 import { SecuritySettings } from './settings/SecuritySettings';
 import { NotificationSettings } from './settings/NotificationSettings';
+import { SsoIntegrationForm } from './settings/SsoIntegrationForm';
 
 export function TenantSettings() {
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'sms' | 'email' | 'fcm' | 'security' | 'notifications'>('whatsapp');
+  const [activeTab, setActiveTab] = useState<'whatsapp' | 'sms' | 'email' | 'fcm' | 'security' | 'notifications' | 'sso'>('whatsapp');
 
 
   const tabs = [
@@ -16,6 +17,7 @@ export function TenantSettings() {
     { id: 'sms', label: 'SMS API', icon: Smartphone },
     { id: 'email', label: 'Email API', icon: Mail },
     { id: 'fcm', label: 'FCM API', icon: Bell },
+    { id: 'sso', label: 'SSO Integration', icon: KeyRound },
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'notifications', label: 'Notifications', icon: Bell },
   ];
@@ -58,6 +60,7 @@ export function TenantSettings() {
       {activeTab === 'sms' && <SMSSettings />}
       {activeTab === 'email' && <EmailSettings />}
       {activeTab === 'fcm' && <FCMSettings />}
+      {activeTab === 'sso' && <SsoIntegrationForm />}
       {activeTab === 'security' && <SecuritySettings />}
       {activeTab === 'notifications' && <NotificationSettings />}
     </div>

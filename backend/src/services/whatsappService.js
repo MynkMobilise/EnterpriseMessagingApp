@@ -1,9 +1,11 @@
 const axios = require('axios');
-const { Message, OrganizationSettings } = require('../models');
+const { Message, OrganizationSettings, Template, Contact, MessageEvent } = require('../models');
 const logger = require('../utils/logger');
-const { decrypt, encrypt } = require('../utils/encryption');
+const { decrypt, encrypt, isEncrypted } = require('../utils/encryption');
 const traceLogService = require('./traceLogService');
 const { AppError } = require('../utils/errorTypes');
+const inboundMediaService = require('./inboundMediaService');
+const { normalizePhone } = require('../utils/phoneNumber');
 
 class WhatsAppService {
   /**
@@ -274,7 +276,11 @@ class WhatsAppService {
         variables: variables,
       });
       
-      const payload = this.prepareMessagePayload(message, settings, variables, template);
+      const payload = await this.prepareMessagePayload(message, settings, variables, template, {
+        accessToken,
+        phoneNumberId,
+        apiVersion,
+      });
 
       await traceLogService.logTrace(message.id, 'processing', {
         stage: 'payload_prepared',
@@ -368,7 +374,7 @@ class WhatsAppService {
   /**
    * Prepare message payload for WhatsApp API
    */
-  prepareMessagePayload(message, settings, variables = {}, template = null) {
+  async prepareMessagePayload(message, settings, variables = {}, template = null, sendCtx = {}) {
     const basePayload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -383,7 +389,7 @@ class WhatsAppService {
         language: {
           code: template.language || 'en',
         },
-        components: this.prepareTemplateComponents(variables, template),
+        components: await this.prepareTemplateComponents(variables, template, sendCtx),
       };
     } else {
       // Text message
@@ -402,7 +408,7 @@ class WhatsAppService {
    * @param {Object} template - Template object with buttons array
    * @returns {Array} Components array for WhatsApp API
    */
-  prepareTemplateComponents(variables, template = null) {
+  async prepareTemplateComponents(variables, template = null, sendCtx = {}) {
     const components = [];
 
     // Add body component with parameters if variables exist
@@ -419,10 +425,14 @@ class WhatsAppService {
         return numA - numB;
       });
       
-      // Extract values in order (excluding button-specific variables)
+      // Extract values in order (excluding button-specific variables and
+      // per-card variables — `card{N}.var` belongs to a card body, not the
+      // top-level body).
       sortedKeys.forEach(key => {
-        // Skip button-specific variables (they'll be handled separately)
         if (key.toLowerCase().includes('button') || key.toLowerCase().includes('url')) {
+          return;
+        }
+        if (/^card\d+[._-]/i.test(key)) {
           return;
         }
         const value = variables[key];
@@ -441,6 +451,71 @@ class WhatsAppService {
           parameters: parameterValues,
         });
       }
+    }
+
+    // Carousel: when sending a carousel template, Meta wants a CAROUSEL
+    // component with one entry per card. Each card MUST include a HEADER
+    // component referencing a media_id (the approved header_handle is NOT
+    // reused at send time — Meta requires a fresh media reference). We
+    // upload each card's local media to the messages-media endpoint to
+    // mint a media_id at send time. Cards may also carry per-card BODY
+    // variables: we look for keys like `card1.var1` in the `variables`
+    // object so a single send call can pass per-card values.
+    if (template?.templateType === 'carousel' && Array.isArray(template.cards)) {
+      const metaUploadService = require('./metaUploadService');
+      const { accessToken, phoneNumberId, apiVersion } = sendCtx;
+
+      const cardComponents = await Promise.all(template.cards.map(async (card, idx) => {
+        const cardIdx = String(idx + 1);
+        const perCardVars = {};
+        if (variables && typeof variables === 'object') {
+          for (const [key, value] of Object.entries(variables)) {
+            const m = key.match(/^card(\d+)[._-](.+)$/i);
+            if (m && m[1] === cardIdx) perCardVars[m[2]] = value;
+          }
+        }
+        const subComponents = [];
+
+        // HEADER (required) — upload the card's local media to get a
+        // fresh media_id and attach it as the header parameter.
+        if (!card?.media?.url) {
+          throw new AppError(`Carousel card ${idx + 1} is missing media; cannot send.`, 400);
+        }
+        if (!accessToken || !phoneNumberId) {
+          throw new AppError('Missing access token / phone_number_id for carousel media upload', 500);
+        }
+        const headerKind = card.media.type === 'video' ? 'video' : 'image';
+        const mediaId = await metaUploadService.uploadMessageMedia({
+          localUrl: card.media.url,
+          phoneNumberId,
+          accessToken,
+          apiVersion,
+        });
+        subComponents.push({
+          type: 'header',
+          parameters: [
+            { type: headerKind, [headerKind]: { id: mediaId } },
+          ],
+        });
+
+        // BODY — only if there are per-card variables to substitute.
+        const cardParams = Object.keys(perCardVars)
+          .sort((a, b) => (parseInt(a.replace(/[^0-9]/g, '')) || 0) - (parseInt(b.replace(/[^0-9]/g, '')) || 0))
+          .map((k) => ({ type: 'text', text: String(perCardVars[k]) }))
+          .filter((p) => p.text !== '' && p.text !== 'null' && p.text !== 'undefined');
+        if (cardParams.length > 0) {
+          subComponents.push({ type: 'body', parameters: cardParams });
+        }
+
+        // Meta rejects an extra `type` key on the card object — cards only
+        // carry `card_index` + `components`. The wrapping component below
+        // is what's typed as 'carousel'.
+        return {
+          card_index: idx,
+          components: subComponents,
+        };
+      }));
+      components.push({ type: 'carousel', cards: cardComponents });
     }
 
     // Buttons are handled by WhatsApp template itself - no dynamic parameters needed
@@ -465,6 +540,10 @@ class WhatsAppService {
         for (const change of changes) {
           if (change.field === 'messages') {
             await this.handleMessageStatus(change.value);
+          } else if (change.field === 'message_template_status_update') {
+            await this.handleTemplateStatusUpdate(change.value);
+          } else {
+            logger.info('Unhandled webhook field', { field: change.field });
           }
         }
       }
@@ -475,10 +554,81 @@ class WhatsAppService {
   }
 
   /**
-   * Handle message status update
+   * Handle Meta template approval status updates.
+   * Payload shape (Meta v18+):
+   *   { event: 'APPROVED' | 'REJECTED' | 'FLAGGED' | 'PAUSED' | 'PENDING_DELETION',
+   *     message_template_id: <numeric Meta id>,
+   *     message_template_name: '...', message_template_language: 'en_US',
+   *     reason: '...' (when REJECTED) }
+   */
+  async handleTemplateStatusUpdate(value) {
+    const metaTemplateId = value?.message_template_id;
+    const event = value?.event;
+    if (!metaTemplateId || !event) {
+      logger.warn('Malformed template status webhook', { value });
+      return;
+    }
+
+    const template = await Template.findOne({
+      where: { whatsappTemplateId: String(metaTemplateId) },
+    });
+
+    if (!template) {
+      logger.warn('Received template status update for unknown template', {
+        metaTemplateId,
+        event,
+        templateName: value?.message_template_name,
+      });
+      return;
+    }
+
+    const updates = {};
+    switch (event) {
+      case 'APPROVED':
+        updates.whatsappStatus = 'approved';
+        updates.status = 'approved';
+        updates.approvedAt = new Date();
+        updates.rejectionReason = null;
+        updates.whatsappRejectionReason = null;
+        break;
+      case 'REJECTED':
+        updates.whatsappStatus = 'rejected';
+        updates.status = 'rejected';
+        updates.rejectedAt = new Date();
+        updates.rejectionReason = value.reason || null;
+        updates.whatsappRejectionReason = value.reason || null;
+        break;
+      case 'FLAGGED':
+      case 'PAUSED':
+      case 'PENDING_DELETION':
+        // Don't change approval state — these are operational signals.
+        // Just log and store the reason if present.
+        if (value.reason) updates.whatsappRejectionReason = value.reason;
+        break;
+      default:
+        logger.info('Unknown template status event, ignoring', { event });
+        return;
+    }
+
+    await template.update(updates);
+    logger.info('Template status updated from Meta webhook', {
+      templateId: template.id,
+      metaTemplateId,
+      event,
+      newStatus: updates.whatsappStatus || template.whatsappStatus,
+    });
+  }
+
+  /**
+   * Handle the `messages` webhook field. Meta puts two different things here:
+   *
+   *   - `statuses[]`: status updates for messages WE sent (sent → delivered → read)
+   *   - `messages[]`: inbound messages a customer sent to our number
+   *
+   * Process both. Inbound is resolved by metadata.phone_number_id → org.
    */
   async handleMessageStatus(value) {
-    const { statuses, messages } = value;
+    const { statuses, messages, contacts, metadata } = value;
 
     if (statuses && statuses.length > 0) {
       for (const status of statuses) {
@@ -490,6 +640,170 @@ class WhatsAppService {
           await this.updateMessageStatus(message, status);
         }
       }
+    }
+
+    if (messages && messages.length > 0) {
+      const phoneNumberId = metadata?.phone_number_id;
+      if (!phoneNumberId) {
+        logger.warn('Inbound webhook missing phone_number_id; cannot resolve org', { value });
+        return;
+      }
+      const settings = await OrganizationSettings.findOne({
+        where: { whatsappPhoneNumberId: phoneNumberId },
+      });
+      if (!settings) {
+        logger.warn('Inbound webhook for unknown phone_number_id', { phoneNumberId });
+        return;
+      }
+      for (const msg of messages) {
+        try {
+          await this.handleInboundMessage({
+            organizationId: settings.organizationId,
+            settings,
+            msg,
+            profileName: contacts?.[0]?.profile?.name || null,
+          });
+        } catch (e) {
+          logger.error('Inbound message persist failed', {
+            wamid: msg.id, error: e.message, stack: e.stack,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Persist a single inbound (customer → us) WhatsApp message.
+   * Idempotent — Meta retries the webhook on any non-2xx, so we dedup by wamid.
+   */
+  async handleInboundMessage({ organizationId, settings, msg, profileName }) {
+    // 1. Dedup
+    const existing = await Message.findOne({ where: { externalMessageId: msg.id } });
+    if (existing) return;
+
+    // 2. Resolve / upsert contact for this customer phone
+    //    Meta's `from` is the E.164 number with NO leading '+' (e.g. "919999999999").
+    //    Operator-created contacts may have it with '+' or with formatting —
+    //    match on the normalized form to handle both.
+    const phone = normalizePhone(msg.from || '');
+    const allOrgContacts = await Contact.findAll({
+      where: { organizationId, deletedAt: null },
+      attributes: ['id', 'phoneNumber', 'name'],
+    });
+    let contact = allOrgContacts.find((c) => normalizePhone(c.phoneNumber) === phone) || null;
+    if (!contact) {
+      // Need a creator user. Pick the oldest admin/super_admin in the org —
+      // same heuristic templateSyncService uses for Meta-imported templates.
+      const { User } = require('../models');
+      const { Op } = require('sequelize');
+      const creator = await User.findOne({
+        where: { organizationId, role: { [Op.in]: ['super_admin', 'admin'] } },
+        order: [['createdAt', 'ASC']],
+      }) || await User.findOne({
+        where: { organizationId },
+        order: [['createdAt', 'ASC']],
+      });
+      if (!creator) {
+        logger.warn('Inbound message: no user to attribute new contact to', { organizationId });
+        return;
+      }
+      contact = await Contact.create({
+        organizationId,
+        createdBy: creator.id,
+        phoneNumber: phone,
+        name: profileName || null,
+        status: 'active',
+        source: 'WhatsApp Inbound',
+        optInStatus: 'opted_in', // Customer messaged us, implicit opt-in
+      });
+    } else if (profileName && !contact.name) {
+      // Backfill the name on existing contacts when Meta gives us one.
+      await contact.update({ name: profileName }).catch(() => {});
+    }
+
+    // 3. Decrypt access token for media downloads (only if there's media)
+    let mediaInfo = null;
+    if (['image', 'video', 'audio', 'document', 'sticker'].includes(msg.type)) {
+      const accessToken = this.decryptToken(settings.whatsappAccessToken);
+      const mediaPart = msg[msg.type] || {};
+      if (accessToken && mediaPart.id) {
+        mediaInfo = await inboundMediaService.downloadAndStore({
+          mediaId: mediaPart.id,
+          organizationId,
+          wamid: msg.id,
+          accessToken,
+        });
+      }
+    }
+
+    // 4. Build content + media metadata
+    const mediaTypeMap = {
+      image: 'image', video: 'video', audio: 'audio', document: 'document', sticker: 'image',
+    };
+    const mediaType = mediaTypeMap[msg.type] || null;
+    let content;
+    if (msg.type === 'text') {
+      content = msg.text?.body || '';
+    } else if (msg[msg.type]?.caption) {
+      content = msg[msg.type].caption;
+    } else if (mediaType) {
+      content = `[${msg.type}]`;
+    } else if (msg.type === 'location') {
+      const loc = msg.location || {};
+      content = `[location] ${loc.latitude},${loc.longitude}${loc.name ? ` (${loc.name})` : ''}`;
+    } else if (msg.type === 'contacts') {
+      content = '[contact card]';
+    } else if (msg.type === 'button') {
+      content = msg.button?.text || '[button reply]';
+    } else if (msg.type === 'interactive') {
+      const r = msg.interactive?.button_reply || msg.interactive?.list_reply;
+      content = r?.title || '[interactive reply]';
+    } else {
+      content = `[${msg.type}]`;
+    }
+
+    // 5. Persist
+    const ts = msg.timestamp ? new Date(parseInt(msg.timestamp, 10) * 1000) : new Date();
+    await Message.create({
+      organizationId,
+      sentBy: null,
+      contactId: contact.id,
+      channel: 'whatsapp',
+      direction: 'inbound',
+      messageType: mediaType ? 'media' : 'text',
+      recipientPhone: phone,
+      recipientName: contact.name || null,
+      content,
+      mediaUrl: mediaInfo?.url || null,
+      mediaType: mediaType,
+      requiresApproval: false,
+      approvalStatus: 'approved',
+      deliveryStatus: 'delivered',
+      isRead: false,
+      sentAt: ts,
+      deliveredAt: ts,
+      externalMessageId: msg.id,
+    });
+
+    // Bump contact recency
+    await contact.update({ lastMessageAt: ts }).catch(() => {});
+    logger.info?.('Inbound WhatsApp message persisted', {
+      organizationId, wamid: msg.id, type: msg.type, from: phone,
+    });
+  }
+
+  /**
+   * Decrypt the stored WhatsApp access token. Tolerates plain-text tokens
+   * (legacy state) and encrypted-with-old-key (returns null instead of throwing).
+   */
+  decryptToken(stored) {
+    if (!stored || stored.trim() === '') return null;
+    if (!isEncrypted(stored)) return stored;
+    try {
+      return decrypt(stored);
+    } catch (e) {
+      logger.warn('decryptToken: encryption key mismatch, returning null');
+      return null;
     }
   }
 

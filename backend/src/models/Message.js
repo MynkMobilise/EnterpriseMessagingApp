@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const Message = sequelize.define('messages', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
     primaryKey: true,
   },
   organizationId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     field: 'organization_id',
     references: {
@@ -17,13 +17,27 @@ const Message = sequelize.define('messages', {
     },
   },
   sentBy: {
-    type: DataTypes.UUID,
-    allowNull: false,
+    // Nullable: inbound messages from customers have no operator who sent them.
+    type: DataTypes.INTEGER,
+    allowNull: true,
     field: 'sent_by',
     references: {
       model: 'users',
       key: 'id',
     },
+  },
+  direction: {
+    type: DataTypes.ENUM('inbound', 'outbound'),
+    allowNull: false,
+    defaultValue: 'outbound',
+  },
+  isRead: {
+    // Inbound messages start unread (false) and flip to true when an operator
+    // opens the thread. Outbound messages default true (irrelevant for them).
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+    field: 'is_read',
   },
   submittedAt: {
     type: DataTypes.DATE,
@@ -31,7 +45,7 @@ const Message = sequelize.define('messages', {
     field: 'submitted_at',
   },
   contactId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'contact_id',
     references: {
       model: 'contacts',
@@ -68,7 +82,7 @@ const Message = sequelize.define('messages', {
     field: 'subject',
   },
   templateId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'template_id',
     references: {
       model: 'templates',
@@ -99,7 +113,7 @@ const Message = sequelize.define('messages', {
     field: 'approval_status',
   },
   approvedBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'approved_by',
     references: {
       model: 'users',
@@ -111,7 +125,7 @@ const Message = sequelize.define('messages', {
     field: 'approved_at',
   },
   rejectedBy: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'rejected_by',
     references: {
       model: 'users',
@@ -184,7 +198,7 @@ const Message = sequelize.define('messages', {
     field: 'is_bulk_message',
   },
   bulkBatchId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     field: 'bulk_batch_id',
   },
   metadata: {

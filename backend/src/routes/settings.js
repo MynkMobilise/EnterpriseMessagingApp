@@ -54,6 +54,25 @@ router.post('/test-whatsapp-connection',
   settingsController.testWhatsAppConnection
 );
 
+// ─── SSO Integration ──────────────────────────────────────────────────
+// Returns the SSO config: enabled flag, default role, and the *plain-text*
+// secret. Always behind canManageSettings since the secret allows full user
+// impersonation within the org.
+router.get('/sso',
+  requirePermission('canManageSettings'),
+  settingsController.getSsoConfig
+);
+
+router.put('/sso',
+  requirePermission('canManageSettings'),
+  settingsController.updateSsoConfig
+);
+
+router.post('/sso/rotate',
+  requirePermission('canManageSettings'),
+  settingsController.rotateSsoSecret
+);
+
 module.exports = router;
 
 
