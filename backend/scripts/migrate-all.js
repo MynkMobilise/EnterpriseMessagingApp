@@ -44,6 +44,7 @@ const MIGRATIONS = [
   'migrate-add-sso-fields.js',
   'migrate-add-carousel-fields.js',
   'migrate-add-message-direction.js',
+  'migrate-create-webhook-events.js',
 ];
 
 function runOne(name) {

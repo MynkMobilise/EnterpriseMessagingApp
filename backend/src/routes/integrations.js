@@ -4,7 +4,7 @@
  * These let an external system (HRMS, CRM, ERP, ...) trigger messages
  * without going through the tenant UI. Auth is via API key only — no JWT.
  *
- *   curl -X POST https://suchna.onmobilise.com/api/v1/integrations/messages \
+ *   curl -X POST http://localhost:3003/api/v1/integrations/messages \
  *     -H "X-API-Key: sk_live_<your-key>" \
  *     -H "Content-Type: application/json" \
  *     -d '{

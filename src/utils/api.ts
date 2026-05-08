@@ -730,6 +730,13 @@ export const apiService = {
       return r.data;
     },
   },
+
+  webhooks: {
+    recent: async (params?: { limit?: number }) => {
+      const r = await api.get('/webhooks/recent', { params });
+      return r.data;
+    },
+  },
 };
 
 export default api;

@@ -18,6 +18,7 @@ const MessageEvent = require('./MessageEvent');
 const Media = require('./Media');
 const EmailConfiguration = require('./EmailConfiguration');
 const SmsConfiguration = require('./SmsConfiguration');
+const WebhookEvent = require('./WebhookEvent');
 
 // Organization - User relationship
 Organization.hasMany(User, {
@@ -295,5 +296,6 @@ module.exports = {
   Media,
   EmailConfiguration,
   SmsConfiguration,
+  WebhookEvent,
   sequelize: require('../config/database'),
 };
