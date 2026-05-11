@@ -89,6 +89,13 @@ export function MetaBusinessAccountForm({
             onChange={(e) => onApiVersionChange(e.target.value)}
             className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
           >
+            <option value="v25.0">v25.0 (latest)</option>
+            <option value="v24.0">v24.0</option>
+            <option value="v23.0">v23.0</option>
+            <option value="v22.0">v22.0</option>
+            <option value="v21.0">v21.0</option>
+            <option value="v20.0">v20.0</option>
+            <option value="v19.0">v19.0</option>
             <option value="v18.0">v18.0</option>
             <option value="v17.0">v17.0</option>
             <option value="v16.0">v16.0</option>
