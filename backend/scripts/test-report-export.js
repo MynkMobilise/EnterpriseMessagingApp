@@ -14,7 +14,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-const BASE_URL = process.env.API_URL || 'http://localhost:3003';
+const BASE_URL = process.env.API_URL || 'https://suchna.onmobilise.com';
 const API_BASE = `${BASE_URL}/api/v1`;
 
 // Test credentials (adjust based on your test data)

@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3003';
+const API_BASE_URL = process.env.API_BASE_URL || 'https://suchna.onmobilise.com';
 const TEST_EMAIL = process.env.TEST_EMAIL || 'admin@example.com';
 const TEST_PASSWORD = process.env.TEST_PASSWORD || 'Admin123!@#';
 const TEST_ORG_SLUG = process.env.TEST_ORG_SLUG || 'organisation';

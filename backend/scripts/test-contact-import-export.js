@@ -2,7 +2,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-const BASE_URL = 'http://localhost:3003/api/v1';
+const BASE_URL = 'https://suchna.onmobilise.com/api/v1';
 
 async function testContactImportExport() {
   console.log('🧪 Testing Contact Import/Export Functionality\n');

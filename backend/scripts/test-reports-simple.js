@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const BASE_URL = 'http://localhost:3003/api/v1';
+const BASE_URL = 'https://suchna.onmobilise.com/api/v1';
 
 async function testReports() {
   console.log('🧪 Testing MIS Reports Functionality\n');

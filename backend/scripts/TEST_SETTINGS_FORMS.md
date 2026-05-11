@@ -2,9 +2,9 @@
 
 ## Prerequisites
 
-1. Ensure backend server is running on `http://localhost:3003`
+1. Ensure backend server is running on `https://suchna.onmobilise.com`
 2. Ensure frontend is running (optional, for manual testing)
-3. Reset rate limits if needed: `POST http://localhost:3003/api/v1/auth/reset-rate-limits`
+3. Reset rate limits if needed: `POST https://suchna.onmobilise.com/api/v1/auth/reset-rate-limits`
 
 ## Automated Testing
 
@@ -12,7 +12,7 @@ Run the automated test script:
 
 ```bash
 # First, reset rate limits
-curl -X POST http://localhost:3003/api/v1/auth/reset-rate-limits
+curl -X POST https://suchna.onmobilise.com/api/v1/auth/reset-rate-limits
 
 # Wait a few seconds, then run the test
 node backend/scripts/test-settings-forms-crud.js
@@ -147,7 +147,7 @@ All forms should:
 
 If you encounter rate limiting:
 1. Wait 1-2 minutes
-2. Or reset rate limits: `POST http://localhost:3003/api/v1/auth/reset-rate-limits`
+2. Or reset rate limits: `POST https://suchna.onmobilise.com/api/v1/auth/reset-rate-limits`
 3. Or restart the backend server
 
 If settings don't persist:

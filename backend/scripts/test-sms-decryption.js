@@ -7,7 +7,7 @@ const axios = require('axios');
 const { OrganizationSettings } = require('../src/models');
 const { encrypt, decrypt, isEncrypted } = require('../src/utils/encryption');
 const smsService = require('../src/services/smsService');
-const BASE_URL = 'http://localhost:3003/api/v1';
+const BASE_URL = 'https://suchna.onmobilise.com/api/v1';
 
 // Test configuration
 const TEST_API_KEY = 'test-api-key-12345-abcdef';

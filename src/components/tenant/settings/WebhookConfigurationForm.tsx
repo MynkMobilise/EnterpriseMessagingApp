@@ -9,7 +9,7 @@ import { toast } from 'sonner';
  */
 function getCallbackUrl(): string {
   const apiBase: string =
-    (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3003/api/v1';
+    (import.meta as any).env?.VITE_API_BASE_URL || 'https://suchna.onmobilise.com/api/v1';
   // strip trailing /api/v1 (and any trailing slash) → keep the bare host
   const host = apiBase.replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '');
   return `${host}/api/v1/webhooks/whatsapp`;

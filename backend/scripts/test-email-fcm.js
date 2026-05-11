@@ -1,7 +1,7 @@
 require('dotenv').config();
 const axios = require('axios');
 
-const BASE_URL = process.env.BACKEND_URL || 'http://localhost:3003';
+const BASE_URL = process.env.BACKEND_URL || 'https://suchna.onmobilise.com';
 const API_BASE = `${BASE_URL}/api/v1`;
 
 // Test credentials - Update these if your credentials are different

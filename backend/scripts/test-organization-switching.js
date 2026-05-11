@@ -8,7 +8,7 @@
 
 const axios = require('axios');
 
-const API_BASE_URL = 'http://localhost:3003/api/v1';
+const API_BASE_URL = 'https://suchna.onmobilise.com/api/v1';
 
 // Test credentials
 const SUPER_ADMIN = {

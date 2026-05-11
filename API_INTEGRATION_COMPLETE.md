@@ -53,7 +53,7 @@ All mock data has been removed from the frontend and the application is now full
 ## API Configuration
 
 ### Base URL
-- **Development**: `http://localhost:3003/api/v1`
+- **Development**: `https://suchna.onmobilise.com/api/v1`
 - **Configurable**: Set `VITE_API_BASE_URL` in `.env` file
 
 ### Authentication Flow
@@ -107,10 +107,10 @@ All mock data has been removed from the frontend and the application is now full
 ### Test API Connection
 ```bash
 # Health check
-curl http://localhost:3003/health
+curl https://suchna.onmobilise.com/health
 
 # Register user
-curl -X POST http://localhost:3003/api/v1/auth/register \
+curl -X POST https://suchna.onmobilise.com/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "organizationSlug": "test-org",
@@ -121,7 +121,7 @@ curl -X POST http://localhost:3003/api/v1/auth/register \
   }'
 
 # Login
-curl -X POST http://localhost:3003/api/v1/auth/login \
+curl -X POST https://suchna.onmobilise.com/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",

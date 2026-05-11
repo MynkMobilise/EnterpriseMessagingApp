@@ -1,7 +1,7 @@
 require('dotenv').config();
 const axios = require('axios');
 
-const API_BASE = 'http://localhost:3003/api/v1';
+const API_BASE = 'https://suchna.onmobilise.com/api/v1';
 const TEST_ORG_SLUG = 'default-org';
 const TEST_EMAIL = 'admin@example.com';
 const TEST_PASSWORD = 'Admin123!@#';

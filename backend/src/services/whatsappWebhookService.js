@@ -153,7 +153,7 @@ class WhatsAppWebhookService {
       }
 
       // Build webhook URL
-      const baseUrl = process.env.BACKEND_URL || process.env.FRONTEND_URL || 'http://localhost:3003';
+      const baseUrl = process.env.BACKEND_URL || process.env.FRONTEND_URL || 'https://suchna.onmobilise.com';
       const webhookUrl = `${baseUrl}/api/v1/webhooks/whatsapp`;
 
       // Configure webhook

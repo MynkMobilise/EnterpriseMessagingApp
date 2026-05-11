@@ -10,7 +10,7 @@ require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') }
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 
-const BASE = process.env.API_URL || 'http://localhost:3003/api/v1';
+const BASE = process.env.API_URL || 'https://suchna.onmobilise.com/api/v1';
 
 (async () => {
   console.log('=== SSO end-to-end smoke test ===\n');

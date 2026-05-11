@@ -45,7 +45,7 @@ This guide will walk you through setting up a Meta (Facebook) App for WhatsApp B
 1. Go to **Settings** > **Basic** in your app dashboard
 2. Scroll down to "Valid OAuth Redirect URIs"
 3. Add your callback URL:
-   - Development: `http://localhost:3003/api/v1/whatsapp/oauth/callback`
+   - Development: `https://suchna.onmobilise.com/api/v1/whatsapp/oauth/callback`
    - Production: `https://yourdomain.com/api/v1/whatsapp/oauth/callback`
 4. Click "Save Changes"
 
@@ -104,10 +104,10 @@ Add the following to your `backend/.env` file:
 ```env
 META_APP_ID=your_app_id_here
 META_APP_SECRET=your_app_secret_here
-META_REDIRECT_URI=http://localhost:3003/api/v1/whatsapp/oauth/callback
+META_REDIRECT_URI=https://suchna.onmobilise.com/api/v1/whatsapp/oauth/callback
 META_EMBEDDED_SIGNUP_CONFIG_ID=your_config_id_here  # Optional: Only if embedded signup is enabled
 FRONTEND_URL=http://localhost:3000
-BACKEND_URL=http://localhost:3003  # For webhook URLs
+BACKEND_URL=https://suchna.onmobilise.com  # For webhook URLs
 ```
 
 For production:

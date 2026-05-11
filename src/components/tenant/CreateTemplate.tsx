@@ -1215,13 +1215,13 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
                               <div className="relative inline-block w-full">
                                 {activeCard.media.type === 'image' ? (
                                   <img
-                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3003'}${activeCard.media.url}`}
+                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'https://suchna.onmobilise.com'}${activeCard.media.url}`}
                                     alt={`Card ${activeCardIndex + 1} media`}
                                     className="max-h-56 mx-auto rounded object-contain"
                                   />
                                 ) : (
                                   <video
-                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3003'}${activeCard.media.url}`}
+                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'https://suchna.onmobilise.com'}${activeCard.media.url}`}
                                     controls
                                     className="max-h-56 mx-auto rounded"
                                   />
@@ -1874,13 +1874,13 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
                               {activeCard?.media?.url ? (
                                 activeCard.media.type === 'video' ? (
                                   <video
-                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3003'}${activeCard.media.url}`}
+                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'https://suchna.onmobilise.com'}${activeCard.media.url}`}
                                     className="w-full h-full object-cover"
                                     muted
                                   />
                                 ) : (
                                   <img
-                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3003'}${activeCard.media.url}`}
+                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'https://suchna.onmobilise.com'}${activeCard.media.url}`}
                                     alt="Card media"
                                     className="w-full h-full object-cover"
                                   />

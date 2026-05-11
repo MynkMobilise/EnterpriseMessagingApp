@@ -1,12 +1,12 @@
 /**
  * Simplified Settings Forms Test
  * Run this after manually resetting rate limits
- * Usage: curl -X POST http://localhost:3003/api/v1/auth/reset-rate-limits && sleep 2 && node backend/scripts/test-settings-forms-simple.js
+ * Usage: curl -X POST https://suchna.onmobilise.com/api/v1/auth/reset-rate-limits && sleep 2 && node backend/scripts/test-settings-forms-simple.js
  */
 
 const axios = require('axios');
 
-const BASE_URL = 'http://localhost:3003/api/v1';
+const BASE_URL = 'https://suchna.onmobilise.com/api/v1';
 let authToken = '';
 
 async function login() {
@@ -32,7 +32,7 @@ async function login() {
   } catch (error) {
     if (error.response?.status === 429) {
       console.log('✗ Rate limited. Please reset rate limits first:');
-      console.log('  curl -X POST http://localhost:3003/api/v1/auth/reset-rate-limits');
+      console.log('  curl -X POST https://suchna.onmobilise.com/api/v1/auth/reset-rate-limits');
     } else {
       console.log(`✗ Login error: ${error.response?.data?.error?.message || error.message}`);
     }

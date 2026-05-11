@@ -75,7 +75,7 @@ interface ApprovedTemplate {
 }
 
 const MEDIA_BASE =
-  (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3003';
+  (import.meta as any).env?.VITE_API_BASE_URL || 'https://suchna.onmobilise.com';
 
 export function LiveChat() {
   const [conversations, setConversations] = useState<Conversation[]>([]);

@@ -43,7 +43,7 @@ interface ApiKeyRow {
 }
 
 const API_BASE_FOR_DOCS =
-  ((import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3003/api/v1').replace(/\/+$/, '');
+  ((import.meta as any).env?.VITE_API_BASE_URL || 'https://suchna.onmobilise.com/api/v1').replace(/\/+$/, '');
 
 export function ERPIntegrations() {
   const [keys, setKeys] = useState<ApiKeyRow[]>([]);

@@ -71,7 +71,7 @@ export function MediaLibrary() {
 
   // Get API base URL
   const getApiBaseUrl = () => {
-    return import.meta.env.VITE_API_BASE_URL || 'http://localhost:3003';
+    return import.meta.env.VITE_API_BASE_URL || 'https://suchna.onmobilise.com';
   };
 
   // Fetch media items and stats
