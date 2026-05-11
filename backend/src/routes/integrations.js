@@ -144,6 +144,113 @@ router.post('/messages', async (req, res, next) => {
 });
 
 /**
+ * GET /integrations/templates
+ *
+ * List all templates for the API key's organization. Lets an external
+ * system enumerate the templates it can send via /integrations/messages
+ * without having to be told the names out-of-band.
+ *
+ * Query params (all optional):
+ *   channel  - 'whatsapp' | 'sms' | 'email' | 'fcm'  (filter)
+ *   status   - 'draft' | 'pending_approval' | 'approved' | 'rejected'
+ *              defaults to 'approved' since only approved templates are
+ *              sendable; pass 'all' to see every status.
+ *   search   - substring match against name / description
+ *   limit    - 1..200, default 100
+ *   page     - 1..N, default 1
+ */
+router.get('/templates', async (req, res, next) => {
+  try {
+    const { Op } = require('sequelize');
+    const channel = req.query.channel;
+    const statusFilter = (req.query.status || 'approved').toString();
+    const search = (req.query.search || '').toString().trim();
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const offset = (page - 1) * limit;
+
+    const where = { organizationId: req.organizationId, deletedAt: null };
+    if (channel && ['whatsapp', 'sms', 'email', 'fcm'].includes(channel)) {
+      where.channel = channel;
+    }
+    if (statusFilter !== 'all') {
+      where.status = statusFilter;
+    }
+    if (search) {
+      where[Op.or] = [
+        { name: { [Op.like]: `%${search}%` } },
+        { description: { [Op.like]: `%${search}%` } },
+      ];
+    }
+
+    const { count, rows } = await Template.findAndCountAll({
+      where,
+      order: [['createdAt', 'DESC']],
+      limit,
+      offset,
+      // Expose only the fields that matter to an external caller wanting to
+      // send messages — hide internal columns like whatsappRejectionReason,
+      // approval timestamps, etc.
+      attributes: [
+        'id', 'name', 'channel', 'category', 'language', 'status',
+        'whatsappStatus', 'templateType', 'body', 'subject', 'footer',
+        'headerType', 'headerContent', 'variables', 'variableCount',
+        'buttons', 'cards', 'description', 'tags', 'createdAt', 'updatedAt',
+      ],
+    });
+
+    res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total: count,
+        totalPages: Math.max(1, Math.ceil(count / limit)),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /integrations/templates/:nameOrId — convenience lookup so a caller
+ * who knows a template by name (the same identifier used in the send
+ * endpoint) can fetch its full definition + variables.
+ */
+router.get('/templates/:nameOrId', async (req, res, next) => {
+  try {
+    const { Op } = require('sequelize');
+    const param = req.params.nameOrId;
+    const where = { organizationId: req.organizationId, deletedAt: null };
+    if (/^\d+$/.test(param)) {
+      where.id = Number(param);
+    } else {
+      where.name = param;
+    }
+    const tpl = await Template.findOne({
+      where,
+      attributes: [
+        'id', 'name', 'channel', 'category', 'language', 'status',
+        'whatsappStatus', 'templateType', 'body', 'subject', 'footer',
+        'headerType', 'headerContent', 'variables', 'variableCount',
+        'buttons', 'cards', 'description', 'tags', 'createdAt', 'updatedAt',
+      ],
+    });
+    if (!tpl) {
+      return res.status(404).json({
+        success: false,
+        error: { message: `Template not found: ${param}` },
+      });
+    }
+    res.json({ success: true, data: tpl });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /integrations/whoami — handy diagnostic the caller can hit to confirm
  * their API key is valid and which org it's bound to.
  */

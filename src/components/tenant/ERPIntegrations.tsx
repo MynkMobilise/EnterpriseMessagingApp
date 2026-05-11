@@ -419,10 +419,12 @@ function KeyCreatedModal({
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<'curl' | 'node' | 'python'>('curl');
+  const [action, setAction] = useState<'send' | 'listTemplates'>('send');
 
   const sendUrl = `${API_BASE_FOR_DOCS}/integrations/messages`;
+  const templatesUrl = `${API_BASE_FOR_DOCS}/integrations/templates`;
 
-  const samples: Record<typeof tab, string> = {
+  const samples: Record<typeof tab, string> = action === 'send' ? {
     curl: `curl -X POST ${sendUrl} \\
   -H "X-API-Key: ${rawKey}" \\
   -H "Content-Type: application/json" \\
@@ -456,6 +458,25 @@ requests.post(
         'variables': {'1': 'Mayank'},
     },
 )`,
+  } : {
+    curl: `curl "${templatesUrl}?channel=whatsapp&status=approved" \\
+  -H "X-API-Key: ${rawKey}"`,
+    node: `const axios = require('axios');
+
+const { data } = await axios.get('${templatesUrl}', {
+  params: { channel: 'whatsapp', status: 'approved' },
+  headers: { 'X-API-Key': '${rawKey}' },
+});
+// data.data is an array of templates with id, name, language, variables, …
+console.log(data.data.map((t) => t.name));`,
+    python: `import requests
+
+r = requests.get(
+    '${templatesUrl}',
+    headers={'X-API-Key': '${rawKey}'},
+    params={'channel': 'whatsapp', 'status': 'approved'},
+)
+print([t['name'] for t in r.json()['data']])`,
   };
 
   return (
@@ -507,11 +528,33 @@ requests.post(
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
               <label className="block text-sm text-gray-700 dark:text-gray-300">
                 <Code className="w-4 h-4 inline mr-1" />
                 Sample request
               </label>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setAction('send')}
+                  className={`px-2.5 py-1 text-xs rounded ${
+                    action === 'send'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  Send message
+                </button>
+                <button
+                  onClick={() => setAction('listTemplates')}
+                  className={`px-2.5 py-1 text-xs rounded ${
+                    action === 'listTemplates'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  List templates
+                </button>
+              </div>
               <div className="flex gap-1">
                 {(['curl', 'node', 'python'] as const).map((t) => (
                   <button
