@@ -68,8 +68,10 @@ function makeId(prefix = ''): string {
 
 /**
  * Substitute {{n}} placeholders in body text with the user's sample values
- * so the live preview shows a realistic message. Falls back to leaving the
- * placeholder visible when no sample is provided yet.
+ * so the live preview shows a realistic message. Falls back to "Sample N"
+ * — matching what the backend sends to Meta as `example.body_text` when no
+ * user-provided sample exists — so the preview never shows raw
+ * placeholders.
  *
  *   - For standard templates, samples are keyed "1", "2", …
  *   - For carousel per-card bodies, pass prefix "card1.", "card2.", …
@@ -81,9 +83,15 @@ function applySamples(
   prefix: string = '',
 ): string {
   if (!text) return text;
-  return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, varName) => {
+  // Walk the matches in order so we can give each placeholder a stable
+  // "Sample N" index for the fallback (N corresponds to 1-based occurrence).
+  const seen: Record<string, number> = {};
+  let order = 0;
+  return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, varName) => {
+    if (!(varName in seen)) seen[varName] = ++order;
     const v = samples?.[prefix + varName];
-    return typeof v === 'string' && v.length > 0 ? v : match;
+    if (typeof v === 'string' && v.length > 0) return v;
+    return `Sample ${seen[varName]}`;
   });
 }
 
