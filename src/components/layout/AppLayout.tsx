@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { apiService } from '../../utils/api';
 import { OrganizationSwitcher } from '../OrganizationSwitcher';
 import { OrganizationProvider } from '../../contexts/OrganizationContext';
+import { useAuth, PermissionKey, Role } from '../../contexts/AuthContext';
 import { ImpersonateUser } from '../ImpersonateUser';
 import { ChangePassword } from '../auth/ChangePassword';
 import { Toaster, toast } from 'sonner';
@@ -10,57 +11,69 @@ import {
   Home, Send, FileText, Image, Activity, Webhook, Blocks, CreditCard,
   Settings, Building2, Bell, Moon, Sun, ChevronDown, ChevronLeft, ChevronRight,
   Menu, X, LogOut, Lock, User, Users, CheckCircle, BarChart3, Shield,
-  MessageCircle,
+  MessageCircle, UsersRound, LineChart,
 } from 'lucide-react';
 
-type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; section: 'ops' | 'admin' };
+type NavItem = {
+  to: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  section: 'ops' | 'admin';
+  /** Show the item if the user has ANY of these permissions. Empty/undefined = always shown. */
+  anyOf?: PermissionKey[];
+  /** Restrict the item to one or more roles (in addition to anyOf). */
+  role?: Role | Role[];
+};
 
+// Permission gating must match the route guards in App.tsx — if these drift,
+// users will see menu items that 403 on click.
 const NAV: NavItem[] = [
   { to: '/home', label: 'Home Dashboard', icon: Home, section: 'ops' },
-  { to: '/chat', label: 'Live Chat', icon: MessageCircle, section: 'ops' },
-  { to: '/send', label: 'Send Message', icon: Send, section: 'ops' },
-  { to: '/templates', label: 'Templates', icon: FileText, section: 'ops' },
-  { to: '/contacts', label: 'Contacts', icon: Users, section: 'ops' },
-  { to: '/media', label: 'Media Library', icon: Image, section: 'ops' },
-  { to: '/logs', label: 'Message Logs', icon: Activity, section: 'ops' },
-  { to: '/approval', label: 'Approval Center', icon: CheckCircle, section: 'ops' },
-  { to: '/reports', label: 'MIS Reports', icon: BarChart3, section: 'ops' },
-  { to: '/users', label: 'User Management', icon: User, section: 'admin' },
-  { to: '/roles', label: 'Role Management', icon: Shield, section: 'admin' },
-  { to: '/webhooks', label: 'Webhook Events', icon: Webhook, section: 'admin' },
-  { to: '/erp', label: 'Integrations', icon: Blocks, section: 'admin' },
-  { to: '/billing', label: 'Billing & Usage', icon: CreditCard, section: 'admin' },
-  { to: '/organizations', label: 'Organizations', icon: Building2, section: 'admin' },
-  { to: '/settings', label: 'Settings', icon: Settings, section: 'admin' },
+  { to: '/chat', label: 'Live Chat', icon: MessageCircle, section: 'ops', anyOf: ['canViewLiveChat'] },
+  { to: '/send', label: 'Send Message', icon: Send, section: 'ops', anyOf: ['canSendMessages'] },
+  { to: '/templates', label: 'Templates', icon: FileText, section: 'ops', anyOf: ['canManageTemplates'] },
+  { to: '/contacts', label: 'Contacts', icon: Users, section: 'ops', anyOf: ['canManageContacts'] },
+  { to: '/contact-groups', label: 'Contact Groups', icon: UsersRound, section: 'ops', anyOf: ['canManageContacts'] },
+  { to: '/media', label: 'Media Library', icon: Image, section: 'ops', anyOf: ['canManageTemplates', 'canSendMessages'] },
+  { to: '/logs', label: 'Message Logs', icon: Activity, section: 'ops', anyOf: ['canViewReports'] },
+  { to: '/approval', label: 'Approval Center', icon: CheckCircle, section: 'ops', anyOf: ['canApproveMessages'] },
+  { to: '/reports', label: 'MIS Reports', icon: BarChart3, section: 'ops', anyOf: ['canViewReports'] },
+  { to: '/leadership', label: 'Leadership', icon: LineChart, section: 'ops', anyOf: ['canViewLeadership'] },
+  { to: '/users', label: 'User Management', icon: User, section: 'admin', anyOf: ['canManageUsers'] },
+  { to: '/roles', label: 'Role Management', icon: Shield, section: 'admin', anyOf: ['canAssignRoles', 'canManageUsers'] },
+  { to: '/webhooks', label: 'Webhook Events', icon: Webhook, section: 'admin', anyOf: ['canManageSettings'] },
+  { to: '/erp', label: 'Integrations', icon: Blocks, section: 'admin', anyOf: ['canManageSettings'] },
+  { to: '/billing', label: 'Billing & Usage', icon: CreditCard, section: 'admin', anyOf: ['canManageOrganization'] },
+  { to: '/organizations', label: 'Organizations', icon: Building2, section: 'admin', role: 'super_admin' },
+  { to: '/settings', label: 'Settings', icon: Settings, section: 'admin', anyOf: ['canManageSettings'] },
 ];
 
 export function AppLayout() {
   const navigate = useNavigate();
+  const { user, hasPermission, hasRole, refresh: refreshAuth } = useAuth();
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
-  const [userEmail, setUserEmail] = useState('');
-  const [userRole, setUserRole] = useState<string>('');
-  const [orgName, setOrgName] = useState<string>('');
-  const [orgPlan, setOrgPlan] = useState<string>('');
 
-  // Restore user + org info on mount (ProtectedRoute already validated the token).
-  // Populates header chrome (org name, role-gated controls) without an extra round trip.
-  useEffect(() => {
-    apiService.auth.getCurrentUser().then((r) => {
-      if (r?.success && r.data) {
-        setUserEmail(r.data.email || '');
-        setUserRole(r.data.role || '');
-        if (r.data.organization) {
-          setOrgName(r.data.organization.name || '');
-          setOrgPlan(r.data.organization.plan || '');
-        }
-      }
-    }).catch(() => {});
-  }, []);
+  const userEmail = user?.email || '';
+  const orgName = user?.organization?.name || '';
+  const orgPlan = user?.organization?.plan || '';
+  const isSuperAdmin = user?.role === 'super_admin';
 
-  const isSuperAdmin = userRole === 'super_admin';
+  // Filter NAV by permission/role. super_admin is bypassed inside hasPermission,
+  // so they see everything. Anything without an `anyOf` or `role` is always shown.
+  const isNavItemVisible = (item: NavItem) => {
+    if (item.role) {
+      const roles = Array.isArray(item.role) ? item.role : [item.role];
+      if (!hasRole(...roles)) return false;
+    }
+    if (item.anyOf && item.anyOf.length > 0) {
+      return item.anyOf.some((p) => hasPermission(p));
+    }
+    return true;
+  };
+  const visibleNav = NAV.filter(isNavItemVisible);
 
   const isDark = theme === 'dark';
 
@@ -71,6 +84,9 @@ export function AppLayout() {
       // Continue logout even if API call fails
     }
     localStorage.removeItem('accessToken');
+    // Clear AuthContext so a re-login as a different user doesn't briefly
+    // see the previous user's permissions before /auth/me returns.
+    refreshAuth().catch(() => {});
     setShowProfileDropdown(false);
     toast.success('Logged out successfully');
     navigate('/login', { replace: true });
@@ -141,12 +157,10 @@ export function AppLayout() {
             <div className="flex items-center gap-2">
               <ImpersonateUser
                 onImpersonate={() => {
-                  const token = localStorage.getItem('accessToken');
-                  if (token) {
-                    apiService.auth.getCurrentUser().then((r) => {
-                      if (r.success && r.data) setUserEmail(r.data.email || '');
-                    }).catch(() => {});
-                  }
+                  // After impersonation, the new accessToken belongs to the
+                  // target user — refresh AuthContext so menu/permissions
+                  // re-evaluate against the impersonated identity.
+                  refreshAuth().catch(() => {});
                 }}
               />
 
@@ -246,7 +260,7 @@ export function AppLayout() {
               <div className="px-3 py-2">
                 <p className={`text-xs uppercase tracking-wider ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Operations</p>
               </div>
-              {NAV.filter((n) => n.section === 'ops').map((item) => {
+              {visibleNav.filter((n) => n.section === 'ops').map((item) => {
                 const Icon = item.icon;
                 return (
                   <NavLink
@@ -262,27 +276,31 @@ export function AppLayout() {
               })}
             </div>
 
-            <div className={`border-t ${isDark ? 'border-gray-800' : 'border-gray-200'}`}></div>
+            {visibleNav.some((n) => n.section === 'admin') && (
+              <>
+                <div className={`border-t ${isDark ? 'border-gray-800' : 'border-gray-200'}`}></div>
 
-            <div className="space-y-1">
-              <div className="px-3 py-2">
-                <p className={`text-xs uppercase tracking-wider ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Administration</p>
-              </div>
-              {NAV.filter((n) => n.section === 'admin').map((item) => {
-                const Icon = item.icon;
-                return (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    onClick={closeSidebarOnMobile}
-                    className={navLinkClass}
-                  >
-                    <Icon className="w-5 h-5 flex-shrink-0" />
-                    <span className="text-sm">{item.label}</span>
-                  </NavLink>
-                );
-              })}
-            </div>
+                <div className="space-y-1">
+                  <div className="px-3 py-2">
+                    <p className={`text-xs uppercase tracking-wider ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Administration</p>
+                  </div>
+                  {visibleNav.filter((n) => n.section === 'admin').map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        onClick={closeSidebarOnMobile}
+                        className={navLinkClass}
+                      >
+                        <Icon className="w-5 h-5 flex-shrink-0" />
+                        <span className="text-sm">{item.label}</span>
+                      </NavLink>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </nav>
         </aside>
 

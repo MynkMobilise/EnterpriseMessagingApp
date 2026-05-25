@@ -16,6 +16,9 @@ interface MessageComposerProps {
   onTextMessageChange: (text: string) => void;
   attachment: File | null;
   onAttachmentChange: (file: File | null) => void;
+  /** Optional — parent can react to the selected template (e.g. compute cost
+   *  from category). Fires whenever the resolved template changes. */
+  onSelectedTemplateChange?: (template: Template | null) => void;
 }
 
 export function MessageComposer({
@@ -30,6 +33,7 @@ export function MessageComposer({
   onTextMessageChange,
   attachment,
   onAttachmentChange,
+  onSelectedTemplateChange,
 }: MessageComposerProps) {
   const { currentOrganization } = useOrganization();
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -67,6 +71,13 @@ export function MessageComposer({
   }, [channel, currentOrganization?.id]);
 
   const selectedTemplateData = templates.find((t) => t.id === selectedTemplate);
+
+  // Notify parent whenever the resolved template object changes so it can
+  // react (e.g. recompute cost based on the template's category).
+  useEffect(() => {
+    if (onSelectedTemplateChange) onSelectedTemplateChange(selectedTemplateData || null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTemplate, templates.length]);
 
   // Searchable template dropdown — replaces the native <select> so users
   // with many approved templates can filter by name or category.

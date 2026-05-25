@@ -312,16 +312,18 @@ class WhatsAppService {
       );
 
       // Send to WhatsApp API
-      const response = await axios.post(
+      // Wrapped so we can recover from Meta error 132000/132001 (template
+      // exists but not in the requested language) by retrying once with a
+      // swapped language code (en ↔ en_US, hi ↔ hi_IN, …). On success we
+      // also persist the corrected code on the Template row so future sends
+      // skip the retry.
+      const response = await this.postTemplateWithLanguageRetry({
         apiUrl,
         payload,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+        accessToken,
+        template,
+        messageId: message.id,
+      });
 
       const duration = Date.now() - startTime;
 
@@ -355,19 +357,136 @@ class WhatsAppService {
       }, 'Meta WhatsApp');
       
       logger.error('WhatsApp send error:', error.response?.data || error.message);
-      
+
       // Provide more detailed error message
       let errorMessage = `WhatsApp send failed: ${error.response?.data?.error?.message || error.message}`;
-      
+
       // Add helpful context for common errors
-      if (error.response?.data?.error) {
-        const apiError = error.response.data.error;
+      const apiError = error?.response?.data?.error;
+      if (apiError) {
         if (apiError.code === 100 && apiError.error_subcode === 33) {
           errorMessage += ' This usually means the Phone Number ID is incorrect, the access token lacks permissions, or the phone number is not properly linked to your WABA. Please verify your WhatsApp configuration in Settings → WhatsApp API → Manual Configuration.';
+        } else if (apiError.code === 132000 || apiError.code === 132001) {
+          // We already tried a one-shot language swap upstream. Hitting this
+          // means BOTH locale variants failed → the template no longer exists
+          // at Meta, was renamed, or was never approved under any language
+          // we know. The 15-min cron will mark it archived on its next pass,
+          // but surface a clearer message now so the operator doesn't think
+          // it's a transient outage. Also mark this template as needing
+          // attention so it stops being retried.
+          errorMessage =
+            `Template "${message?.template?.name || message?.templateId}" is not approved at Meta in any expected language. ` +
+            'Click "Refresh from Meta" on the Templates page — if the template is missing from Meta\'s response it will be archived automatically. ' +
+            'Then re-pick a valid template and resend.';
+          if (message?.template?.id) {
+            try {
+              await Template.update(
+                {
+                  whatsappStatus: 'rejected',
+                  whatsappRejectionReason:
+                    'Send rejected by Meta with code ' + apiError.code +
+                    ' — template not found in the language sent. Refresh from Meta to reconcile.',
+                },
+                { where: { id: message.template.id } }
+              );
+            } catch (_) { /* best-effort flag — don't mask the original error */ }
+          }
+        } else if (apiError.code === 131009 || apiError.code === 131005) {
+          errorMessage += ' The recipient phone number is invalid or not registered on WhatsApp.';
+        } else if (apiError.code === 131047) {
+          errorMessage += ' Outside the 24-hour customer-service window. Use an approved template instead of free-form text.';
+        } else if (apiError.code === 131056) {
+          errorMessage += ' Meta rate-limited this send. Wait a moment and retry.';
+        } else if (apiError.code === 132012) {
+          // Compute what we sent vs what the template expects so the operator
+          // doesn't have to dig through the raw Meta payload.
+          const tpl = message?.template;
+          const tplPlaceholders = countPlaceholders(tpl?.body || '');
+          const sentVars = message?.metadata?.variables || message?.variables || {};
+          const sentCount = Object.keys(sentVars).filter((k) => !/^card\d+[._-]/i.test(k)).length;
+          errorMessage =
+            `Template parameter mismatch for "${tpl?.name || message?.templateId}". ` +
+            `Template body uses ${tplPlaceholders} placeholder${tplPlaceholders === 1 ? '' : 's'} ` +
+            `({{1}} … {{${tplPlaceholders}}}) but you sent ${sentCount} variable${sentCount === 1 ? '' : 's'}. ` +
+            (tplPlaceholders > sentCount
+              ? `Fill in the missing variable${tplPlaceholders - sentCount === 1 ? '' : 's'} on the Send Message page.`
+              : tplPlaceholders < sentCount
+              ? `Remove the extra ${sentCount - tplPlaceholders} variable${sentCount - tplPlaceholders === 1 ? '' : 's'}, or update the template at Meta.`
+              : `Counts match — check that any URL button parameters or header media match the template's shape.`);
+        } else if (apiError.code === 132005) {
+          errorMessage += ' One of the parameter texts exceeds the maximum length allowed by Meta.';
+        } else if (apiError.code === 132015 || apiError.code === 132016) {
+          errorMessage += ' The template is paused or disabled by Meta due to quality / engagement signals. Review it in Meta Business Manager.';
         }
       }
-      
+
       throw new Error(errorMessage);
+    }
+  }
+
+  /**
+   * POST the template payload to Meta with a one-shot language-code retry.
+   * Meta returns error code 132000 / 132001 when the template name is
+   * registered at Meta but not in the language locale we sent. Common
+   * trigger: our DB stores `en` while Meta has it approved as `en_US`
+   * (or vice versa). We retry once with the swap and, on success, persist
+   * the corrected code on the Template row so future sends are clean.
+   */
+  async postTemplateWithLanguageRetry({ apiUrl, payload, accessToken, template, messageId }) {
+    const headers = {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    };
+    try {
+      return await axios.post(apiUrl, payload, { headers });
+    } catch (error) {
+      const apiError = error?.response?.data?.error;
+      const code = apiError?.code;
+      const isLanguageMismatch = code === 132000 || code === 132001;
+      const currentLang = payload?.template?.language?.code;
+      if (!isLanguageMismatch || !currentLang || payload?.type !== 'template') {
+        throw error;
+      }
+
+      const alternate = swapLanguageCode(currentLang);
+      if (!alternate || alternate === currentLang) {
+        throw error;
+      }
+
+      logger.warn('Meta language mismatch; retrying with swapped locale', {
+        templateId: template?.id,
+        templateName: template?.name,
+        from: currentLang,
+        to: alternate,
+        code,
+      });
+
+      const retryPayload = {
+        ...payload,
+        template: {
+          ...payload.template,
+          language: { code: alternate },
+        },
+      };
+
+      const response = await axios.post(apiUrl, retryPayload, { headers });
+
+      // Retry succeeded — persist so we don't retry every send.
+      if (template?.id) {
+        template.update({ language: alternate }).catch((e) => {
+          logger.warn('Could not persist corrected language on Template', {
+            templateId: template.id, error: e.message,
+          });
+        });
+      }
+      if (messageId) {
+        await traceLogService.logTrace(messageId, 'processing', {
+          stage: 'language_corrected_on_retry',
+          from: currentLang,
+          to: alternate,
+        }, { channel: 'whatsapp' });
+      }
+      return response;
     }
   }
 
@@ -382,10 +501,17 @@ class WhatsAppService {
     };
 
     if (message.messageType === 'template' && message.templateId && template) {
-      // Template message
+      // Template message.
+      // CRITICAL: Meta's /messages endpoint expects `template.name` to be
+      // the STRING NAME (e.g. "kudos_live_v1"). It is NOT the numeric
+      // template id that Meta returns at approval time — that id is for
+      // matching approval webhooks back to local rows and has no role in
+      // the send payload. Using it here makes Meta return "template name
+      // does not exist" because there is no template literally called
+      // "1969033270410504".
       basePayload.type = 'template';
       basePayload.template = {
-        name: template.whatsappTemplateId || template.name,
+        name: template.name,
         language: {
           code: template.language || 'en',
         },
@@ -410,6 +536,51 @@ class WhatsAppService {
    */
   async prepareTemplateComponents(variables, template = null, sendCtx = {}) {
     const components = [];
+
+    // ---- HEADER component ------------------------------------------------
+    // Templates approved with a media or dynamic-text header REQUIRE a
+    // header component in the send payload (Meta error 132012 if missing).
+    //
+    //   - image / video / document headers: upload the local file at send
+    //     time to /<phone-number-id>/media to mint a media_id, then send
+    //     `parameters: [{ type: <kind>, [kind]: { id: <mediaId> } }]`.
+    //   - text headers with {{n}} placeholders: send the resolved text as
+    //     `parameters: [{ type: 'text', text: '...' }]`.
+    //   - plain text headers (no placeholders): no parameter needed; Meta
+    //     uses the approved static text.
+    if (template?.headerType && template.headerType !== 'none') {
+      const headerType = template.headerType;
+      if (['image', 'video', 'document'].includes(headerType) && template.headerContent) {
+        const { accessToken, phoneNumberId, apiVersion } = sendCtx;
+        if (!accessToken || !phoneNumberId) {
+          throw new AppError('Missing access token / phone_number_id for header media upload', 500);
+        }
+        const metaUploadService = require('./metaUploadService');
+        const mediaId = await metaUploadService.uploadMessageMedia({
+          localUrl: template.headerContent,
+          phoneNumberId,
+          accessToken,
+          apiVersion,
+        });
+        components.push({
+          type: 'header',
+          parameters: [
+            { type: headerType, [headerType]: { id: mediaId } },
+          ],
+        });
+      } else if (headerType === 'text' && template.headerContent) {
+        // Substitute {{n}} placeholders in the header with variable values.
+        const headerPlaceholders = [...(template.headerContent || '').matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)];
+        if (headerPlaceholders.length > 0) {
+          const headerParams = headerPlaceholders.map((m) => {
+            const varName = m[1];
+            const v = variables?.[varName];
+            return { type: 'text', text: String(v || '') };
+          });
+          components.push({ type: 'header', parameters: headerParams });
+        }
+      }
+    }
 
     // Add body component with parameters if variables exist
     if (variables && typeof variables === 'object' && Object.keys(variables).length > 0) {
@@ -843,6 +1014,43 @@ class WhatsAppService {
       });
     }
   }
+}
+
+/**
+ * Suggest an alternate locale to try when Meta returns 132000/132001
+ * (template-language mismatch).
+ *
+ *   en      → en_US      (most common English variant on Meta)
+ *   en_US   → en
+ *   hi      → hi_IN
+ *   hi_IN   → hi
+ *   xx_YY   → xx          (strip locale suffix)
+ *   xx      → xx_{commonMap[xx]} OR xx_{xx.toUpperCase()}
+ *
+ * Returns null if no sensible alternate exists.
+ */
+const COMMON_LOCALES = {
+  en: 'en_US', hi: 'hi_IN', es: 'es_ES', fr: 'fr_FR', de: 'de_DE',
+  pt: 'pt_BR', zh: 'zh_CN', ja: 'ja_JP', ar: 'ar_AE', it: 'it_IT',
+  ko: 'ko_KR', ru: 'ru_RU', tr: 'tr_TR', th: 'th_TH', vi: 'vi_VN',
+  id: 'id_ID', nl: 'nl_NL', pl: 'pl_PL', sv: 'sv_SE',
+};
+function swapLanguageCode(code) {
+  if (!code) return null;
+  if (code.includes('_')) return code.split('_')[0];          // en_US → en
+  if (COMMON_LOCALES[code]) return COMMON_LOCALES[code];      // en → en_US
+  return `${code}_${code.toUpperCase()}`;                     // xx → xx_XX
+}
+
+/**
+ * Count distinct {{n}} or {{name}} placeholders in a template body. Used
+ * by the 132012 (parameter mismatch) error message to tell the operator
+ * exactly how many variables Meta expects vs how many we sent.
+ */
+function countPlaceholders(text) {
+  if (!text) return 0;
+  const matches = [...String(text).matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)];
+  return new Set(matches.map((m) => m[1])).size;
 }
 
 module.exports = new WhatsAppService();

@@ -45,6 +45,10 @@ const MIGRATIONS = [
   'migrate-add-carousel-fields.js',
   'migrate-add-message-direction.js',
   'migrate-create-webhook-events.js',
+  'migrate-add-hrms-fields.js',
+  'migrate-create-contact-group-user-assignments.js',
+  'migrate-create-org-role-permissions.js',
+  'migrate-add-variable-samples.js',
 ];
 
 function runOne(name) {

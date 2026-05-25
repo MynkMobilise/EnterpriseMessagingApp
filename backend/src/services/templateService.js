@@ -70,8 +70,18 @@ async function buildMetaComponentsFromTemplate(template, opts = {}) {
   const bodyVarMatches = template.body.match(/\{\{(\w+)\}\}/g) || [];
   if (bodyVarMatches.length > 0) {
     const uniqueVars = [...new Set(bodyVarMatches.map((m) => m.replace(/[{}]/g, '')))];
+    // Prefer user-provided samples (from `variableSamples` JSON column).
+    // Fall back to "Sample N" placeholders for any variable the user didn't
+    // fill in — Meta requires SOME value per placeholder, so we never send
+    // empty examples.
+    const samples = template.variableSamples || {};
     bodyComp.example = {
-      body_text: [uniqueVars.map((_, i) => `Sample${i + 1}`)],
+      body_text: [
+        uniqueVars.map((varName, i) => {
+          const v = samples[varName];
+          return (typeof v === 'string' && v.trim()) ? v.trim() : `Sample ${i + 1}`;
+        }),
+      ],
     };
   }
   components.push(bodyComp);
@@ -152,13 +162,30 @@ async function buildMetaCarouselComponents(template, { accessToken, appId }) {
       accessToken,
     });
     const headerFormat = card.media.type === 'video' ? 'VIDEO' : 'IMAGE';
+    // Per-card body samples are keyed `card{N}.{varName}` in the template's
+    // variableSamples object (where N is 1-based card index).
+    const cardBody = { type: 'BODY', text: card.content };
+    const cardVarMatches = card.content.match(/\{\{(\w+)\}\}/g) || [];
+    if (cardVarMatches.length > 0) {
+      const uniqueCardVars = [...new Set(cardVarMatches.map((m) => m.replace(/[{}]/g, '')))];
+      const samples = template.variableSamples || {};
+      const cardPrefix = `card${idx + 1}.`;
+      cardBody.example = {
+        body_text: [
+          uniqueCardVars.map((varName, i) => {
+            const v = samples[`${cardPrefix}${varName}`];
+            return (typeof v === 'string' && v.trim()) ? v.trim() : `Sample ${i + 1}`;
+          }),
+        ],
+      };
+    }
     const cardComponents = [
       {
         type: 'HEADER',
         format: headerFormat,
         example: { header_handle: [handle] },
       },
-      { type: 'BODY', text: card.content },
+      cardBody,
     ];
     const cardButtons = (card.buttons || [])
       .map(mapCarouselButtonToMeta)
@@ -175,11 +202,19 @@ async function buildMetaCarouselComponents(template, { accessToken, appId }) {
     throw new AppError('Carousel template requires a top-level body (the lede shown above the cards)', 400);
   }
   const topBody = { type: 'BODY', text: template.body };
-  // Body variables example, same as standard
+  // Body variables example — prefer user-provided samples, same as standard.
   const bodyVarMatches = template.body.match(/\{\{(\w+)\}\}/g) || [];
   if (bodyVarMatches.length > 0) {
     const uniq = [...new Set(bodyVarMatches.map((m) => m.replace(/[{}]/g, '')))];
-    topBody.example = { body_text: [uniq.map((_, i) => `Sample${i + 1}`)] };
+    const samples = template.variableSamples || {};
+    topBody.example = {
+      body_text: [
+        uniq.map((varName, i) => {
+          const v = samples[varName];
+          return (typeof v === 'string' && v.trim()) ? v.trim() : `Sample ${i + 1}`;
+        }),
+      ],
+    };
   }
   components.push(topBody);
   components.push({ type: 'CAROUSEL', cards: cardsWithHandles });
@@ -254,6 +289,24 @@ class TemplateService {
       extractedVariables = Array.from(new Set(variableMatches.map(m => m.replace(/[{}]/g, ''))));
     }
 
+    // ALWAYS use the body-derived variables instead of trusting whatever the
+    // frontend sent. The CreateTemplate UI stores `["{{1}}"]` (with braces)
+    // in its state, which breaks the variable-input UI later: MessageComposer
+    // keys input fields by `template.variables[i]`, so "{{1}}" becomes the
+    // user-facing label. extractedVariables is the canonical `["1"]` form.
+    //
+    // variableSamples ({ "1": "John", … }) come from the frontend and get
+    // forwarded to Meta as `example.body_text` at submission time. Filter
+    // out keys that aren't actually placeholders (frontend may have stale
+    // samples for previously-deleted variables).
+    const incomingSamples = data.variableSamples || {};
+    const filteredSamples = {};
+    for (const key of Object.keys(incomingSamples)) {
+      if (extractedVariables.includes(key) || /^card\d+[._-]/i.test(key)) {
+        filteredSamples[key] = incomingSamples[key];
+      }
+    }
+
     const template = await Template.create({
       organizationId,
       createdBy,
@@ -261,8 +314,9 @@ class TemplateService {
       channel,
       category,
       body,
-      variables: variables || extractedVariables,
+      variables: extractedVariables,
       variableCount,
+      variableSamples: Object.keys(filteredSamples).length > 0 ? filteredSamples : null,
       ...otherData,
       status: 'draft',
     });

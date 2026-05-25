@@ -3,6 +3,7 @@ import { Search, Check, Plus, Trash2, Upload, Download, Users } from 'lucide-rea
 import { toast } from 'sonner';
 import { apiService } from '../../../../utils/api';
 import { useOrganization } from '../../../../contexts/OrganizationContext';
+import { SearchableSelect } from '../../../shared/SearchableSelect';
 import type { Channel, Recipient, SendMode } from '../types';
 
 interface RecipientSelectorProps {
@@ -426,18 +427,19 @@ export function RecipientSelector({
             Select Contact Group <span className="text-red-500">*</span>
           </label>
           {contactGroups.length > 0 ? (
-            <select
+            <SearchableSelect
               value={selectedGroupId}
-              onChange={(e) => setSelectedGroupId(e.target.value)}
-              className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
-            >
-              <option value="">-- Select a group --</option>
-              {contactGroups.map((group) => (
-                <option key={group.id} value={group.id}>
-                  {group.name} ({group.contactCount || 0} contacts)
-                </option>
-              ))}
-            </select>
+              onChange={setSelectedGroupId}
+              placeholder="-- Select a group --"
+              searchPlaceholder="Search groups by name…"
+              emptyText="No groups match your search"
+              clearable
+              options={contactGroups.map((group) => ({
+                value: String(group.id),
+                label: group.name,
+                hint: `(${group.contactCount || 0} contacts)`,
+              }))}
+            />
           ) : (
             <div className="px-4 py-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
               <p className="text-sm text-yellow-800 dark:text-yellow-200">

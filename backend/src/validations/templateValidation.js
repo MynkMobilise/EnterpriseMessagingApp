@@ -57,6 +57,9 @@ const templateValidation = {
     headerType: Joi.string().valid('text', 'image', 'video', 'document', 'location').optional(),
     headerContent: Joi.string().optional(),
     variables: Joi.array().items(Joi.string()).optional(),
+    variableSamples: Joi.object()
+      .pattern(Joi.string(), Joi.string().allow(''))
+      .optional(),
     buttons: Joi.array().optional(),
     language: Joi.string().optional(),
     description: Joi.string().optional(),
@@ -75,6 +78,9 @@ const templateValidation = {
     subject: Joi.string().optional(),
     footer: Joi.string().optional(),
     variables: Joi.array().items(Joi.string()).optional(),
+    variableSamples: Joi.object()
+      .pattern(Joi.string(), Joi.string().allow(''))
+      .optional(),
     buttons: Joi.array().optional(),
     description: Joi.string().optional(),
     tags: Joi.array().items(Joi.string()).optional(),

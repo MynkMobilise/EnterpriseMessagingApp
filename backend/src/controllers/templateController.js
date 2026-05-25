@@ -162,10 +162,17 @@ class TemplateController {
       if (result.error) {
         return res.status(400).json({ success: false, error: { message: result.error }, data: result });
       }
+      const parts = [
+        `${result.inserted} new`,
+        `${result.updated} updated`,
+        `${result.skipped} skipped`,
+      ];
+      if (result.languageCorrected) parts.push(`${result.languageCorrected} language-corrected`);
+      if (result.archived) parts.push(`${result.archived} archived (no longer at Meta)`);
       res.json({
         success: true,
         data: result,
-        message: `Synced ${result.inserted} new, ${result.updated} updated, ${result.skipped} skipped`,
+        message: `Synced ${parts.join(', ')}`,
       });
     } catch (error) {
       next(error);

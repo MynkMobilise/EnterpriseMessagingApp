@@ -12,26 +12,20 @@ import {
   Filter,
   Grid3x3,
   Table,
+  Save,
+  Loader2,
+  RotateCcw,
+  Lock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface Role {
   name: string;
   displayName: string;
   description: string;
-  permissions: {
-    canSendMessages?: boolean;
-    canApproveMessages?: boolean;
-    canManageUsers?: boolean;
-    canManageTemplates?: boolean;
-    canManageContacts?: boolean;
-    canViewReports?: boolean;
-    canManageSettings?: boolean;
-    canManageAPIKeys?: boolean;
-    canAssignRoles?: boolean;
-    canManageOrganization?: boolean;
-  };
+  permissions: Record<string, boolean>;
   userCount: number;
   isSystemRole: boolean;
 }
@@ -60,6 +54,10 @@ export function RoleManagement() {
   const [roleUsers, setRoleUsers] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
+  const [editingRole, setEditingRole] = useState<Role | null>(null);
+
+  const { hasPermission } = useAuth();
+  const canEditRoles = hasPermission('canAssignRoles');
 
   // Fetch roles and stats
   useEffect(() => {
@@ -166,10 +164,21 @@ export function RoleManagement() {
     canManageAPIKeys: 'Manage API Keys',
     canAssignRoles: 'Assign Roles',
     canManageOrganization: 'Manage Organization',
+    canViewLiveChat: 'View Live Chat',
+    canViewLeadership: 'View Leadership Dashboard',
+  };
+
+  const refetchRoles = async () => {
+    try {
+      const r = await apiService.roles.list();
+      if (r.success && r.data) setRoles(r.data);
+    } catch {
+      // ignore — modal will toast its own error
+    }
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="colorful p-6 space-y-6">
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -282,13 +291,24 @@ export function RoleManagement() {
                   <Users className="w-4 h-4" />
                   <span>{role.userCount} users</span>
                 </div>
-                <button
-                  onClick={() => handleViewDetails(role)}
-                  className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                >
-                  <Eye className="w-4 h-4" />
-                  View Details
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => handleViewDetails(role)}
+                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                  >
+                    <Eye className="w-4 h-4" />
+                    Details
+                  </button>
+                  {canEditRoles && role.name !== 'super_admin' && (
+                    <button
+                      onClick={() => setEditingRole(role)}
+                      className="text-sm text-gray-700 dark:text-gray-300 hover:underline flex items-center gap-1"
+                    >
+                      <Edit className="w-4 h-4" />
+                      Edit
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Permissions Preview */}
@@ -397,13 +417,24 @@ export function RoleManagement() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => handleViewDetails(role)}
-                        className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-1 ml-auto"
-                      >
-                        <Eye className="w-4 h-4" />
-                        View Details
-                      </button>
+                      <div className="flex items-center justify-end gap-3">
+                        <button
+                          onClick={() => handleViewDetails(role)}
+                          className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-1"
+                        >
+                          <Eye className="w-4 h-4" />
+                          Details
+                        </button>
+                        {canEditRoles && role.name !== 'super_admin' && (
+                          <button
+                            onClick={() => setEditingRole(role)}
+                            className="text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white flex items-center gap-1"
+                          >
+                            <Edit className="w-4 h-4" />
+                            Edit
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -411,6 +442,19 @@ export function RoleManagement() {
             </table>
           </div>
         </div>
+      )}
+
+      {/* Edit Permissions Modal */}
+      {editingRole && (
+        <RolePermissionsEditor
+          role={editingRole}
+          permissionLabels={permissionLabels}
+          onClose={() => setEditingRole(null)}
+          onSaved={() => {
+            setEditingRole(null);
+            refetchRoles();
+          }}
+        />
       )}
 
       {/* Role Details Modal */}
@@ -507,6 +551,177 @@ export function RoleManagement() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------ Edit-Permissions Modal ------------------------- */
+
+function RolePermissionsEditor({
+  role,
+  permissionLabels,
+  onClose,
+  onSaved,
+}: {
+  role: Role;
+  permissionLabels: Record<string, string>;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  // Local copy of the permission map, edited in-place.
+  const [perms, setPerms] = useState<Record<string, boolean>>({ ...role.permissions });
+  const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  // Permission keys to show — pulled from the labels map so we always render
+  // a stable set even if the role response is missing newer keys.
+  const keys = Object.keys(permissionLabels);
+
+  const toggle = (key: string) => {
+    setPerms((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      // Submit the full permission map — backend whitelists & sanitizes.
+      const payload: Record<string, boolean> = {};
+      for (const k of keys) payload[k] = !!perms[k];
+      const r = await apiService.roles.updatePermissions(role.name, payload);
+      if (r?.success) {
+        toast.success(`Permissions saved for ${role.displayName}`);
+        onSaved();
+      } else {
+        toast.error('Save failed', { description: r?.error?.message });
+      }
+    } catch (e: any) {
+      toast.error('Save failed', {
+        description: e?.response?.data?.error?.message || e?.message,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (!window.confirm(`Reset ${role.displayName} permissions to system defaults?`)) return;
+    setResetting(true);
+    try {
+      const r = await apiService.roles.resetPermissions(role.name);
+      if (r?.success) {
+        toast.success('Reset to defaults');
+        onSaved();
+      }
+    } catch (e: any) {
+      toast.error('Reset failed', {
+        description: e?.response?.data?.error?.message || e?.message,
+      });
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg text-gray-900 dark:text-white">
+              Edit {role.displayName} Permissions
+            </h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Changes apply to every {role.displayName.toLowerCase()} in your organization.
+              You can reset to system defaults at any time.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+            aria-label="Close"
+          >
+            <XCircle className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {keys.map((key) => {
+              const enabled = !!perms[key];
+              return (
+                <button
+                  type="button"
+                  key={key}
+                  onClick={() => toggle(key)}
+                  className={`flex items-center justify-between p-3 rounded-lg border text-left transition-colors ${
+                    enabled
+                      ? 'bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-800'
+                      : 'bg-gray-50 border-gray-200 dark:bg-gray-800 dark:border-gray-700'
+                  }`}
+                >
+                  <span className="text-sm text-gray-900 dark:text-white">
+                    {permissionLabels[key] || key}
+                  </span>
+                  <div
+                    className={`w-10 h-6 rounded-full transition-colors relative flex-shrink-0 ${
+                      enabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
+                  >
+                    <div
+                      className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                        enabled ? 'translate-x-4' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-6 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg flex items-start gap-2">
+            <Lock className="w-4 h-4 text-yellow-700 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-yellow-800 dark:text-yellow-200">
+              Per-user overrides (set in User Management → Edit) still take precedence over
+              role-level permissions. Use them for one-off exceptions.
+            </p>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={handleReset}
+            disabled={resetting || saving}
+            className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg flex items-center gap-2 disabled:opacity-50"
+          >
+            {resetting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+            Reset to defaults
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || resetting}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

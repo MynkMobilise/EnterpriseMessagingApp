@@ -180,7 +180,7 @@ export function HomeDashboard() {
   const hasData = stats.length > 0 || messageActivity.length > 0 || recentActivity.length > 0;
 
   return (
-    <div className="p-4 md:p-8">
+    <div className="colorful p-4 md:p-8">
       {/* Page Header */}
       <div className="mb-8">
         <h1 className="text-2xl text-gray-900 dark:text-white mb-2">Home Dashboard</h1>

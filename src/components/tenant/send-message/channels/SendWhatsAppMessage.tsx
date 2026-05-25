@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Send, Clock, DollarSign, CheckCircle } from 'lucide-react';
+import { Send, Clock, IndianRupee, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../../../utils/api';
 import { SendModeSelector } from '../SendModeSelector';
 import { RecipientSelector } from '../shared/RecipientSelector';
 import { MessageComposer } from '../shared/MessageComposer';
-import type { Channel, SendMode, MessageType, Recipient, MessageData } from '../types';
+import type { Channel, SendMode, MessageType, Recipient, MessageData, Template } from '../types';
+import { estimateCost, formatINR, rateBreakdown } from '../../../../utils/pricing';
 
 export function SendWhatsAppMessage() {
   const [sendMode, setSendMode] = useState<SendMode>('single');
@@ -20,6 +21,16 @@ export function SendWhatsAppMessage() {
   const [scheduleMessage, setScheduleMessage] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
+  const [selectedTemplateData, setSelectedTemplateData] = useState<Template | null>(null);
+
+  // WhatsApp pricing: per-template-category for template sends; free-text
+  // replies inside the 24-hr customer-service window are "service" tier (free).
+  const recipientCount = sendMode === 'single' ? 1 : recipients.length;
+  const category =
+    messageType === 'template'
+      ? selectedTemplateData?.category || 'marketing'
+      : 'service';
+  const cost = estimateCost({ channel: 'whatsapp', category, recipientCount });
 
   /**
    * `skipApproval=true` is the "Approve & Send" path — message goes straight
@@ -152,6 +163,7 @@ export function SendWhatsAppMessage() {
             onTextMessageChange={setTextMessage}
             attachment={attachment}
             onAttachmentChange={setAttachment}
+            onSelectedTemplateChange={setSelectedTemplateData}
           />
 
           {/* Advanced Options */}
@@ -197,18 +209,18 @@ export function SendWhatsAppMessage() {
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Cost Estimate */}
-          <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-xl border border-green-200 dark:border-green-800 p-6">
+          <div className="colorful bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-xl border border-green-200 dark:border-green-800 p-6">
             <div className="flex items-start gap-3 mb-4">
-              <DollarSign className="w-6 h-6 text-green-600 dark:text-green-400" />
+              <IndianRupee className="w-6 h-6 text-green-600 dark:text-green-400" />
               <div>
                 <h3 className="text-green-900 dark:text-green-100 mb-1">Estimated Cost</h3>
-                <p className="text-3xl text-green-600 dark:text-green-400">
-                  ${((sendMode === 'single' ? 1 : recipients.length) * 0.005).toFixed(3)}
-                </p>
+                <p className="text-3xl text-green-600 dark:text-green-400">{formatINR(cost)}</p>
               </div>
             </div>
             <div className="text-sm text-green-800 dark:text-green-200 space-y-1">
-              <p>Recipients: {sendMode === 'single' ? 1 : recipients.length}</p>
+              <p>Recipients: {recipientCount}</p>
+              <p className="capitalize">Category: {category}</p>
+              <p className="text-xs opacity-80 pt-1">{rateBreakdown({ channel: 'whatsapp', category, recipientCount })}</p>
             </div>
           </div>
 

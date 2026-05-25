@@ -460,6 +460,7 @@ class AuthService {
         canAssignRoles: true,
         canManageOrganization: true,
         canViewLiveChat: true,
+        canViewLeadership: true,
       },
       admin: {
         canSendMessages: true,
@@ -470,9 +471,10 @@ class AuthService {
         canViewReports: true,
         canManageSettings: true,
         canManageAPIKeys: true,
-        canAssignRoles: false,
+        canAssignRoles: true,
         canManageOrganization: true,
         canViewLiveChat: true,
+        canViewLeadership: true,
       },
       manager: {
         canSendMessages: true,
@@ -485,6 +487,7 @@ class AuthService {
         canManageAPIKeys: false,
         canAssignRoles: false,
         canViewLiveChat: true,
+        canViewLeadership: true,
       },
       operator: {
         canSendMessages: true,
@@ -497,6 +500,7 @@ class AuthService {
         canManageAPIKeys: false,
         canAssignRoles: false,
         canViewLiveChat: true,
+        canViewLeadership: false,
       },
       viewer: {
         canSendMessages: false,
@@ -509,6 +513,7 @@ class AuthService {
         canManageAPIKeys: false,
         canAssignRoles: false,
         canViewLiveChat: true,
+        canViewLeadership: false,
       },
     };
 

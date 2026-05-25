@@ -221,6 +221,35 @@ const OrganizationSettings = sequelize.define('organization_settings', {
     defaultValue: DataTypes.NOW,
     field: 'updated_at',
   },
+  // ---- HRMS integration (per-org nightly contact sync) ----------------
+  hrmsApiUrl: { type: DataTypes.STRING(512), field: 'hrms_api_url' },
+  hrmsApiAuthHeaderName: {
+    type: DataTypes.STRING(128),
+    field: 'hrms_api_auth_header_name',
+  },
+  // Encrypted value of the auth header. Decrypted at sync time only.
+  hrmsApiAuthHeaderValue: {
+    type: DataTypes.TEXT,
+    field: 'hrms_api_auth_header_value',
+  },
+  // Cursor passed as `last_sync_datetime` on the next call so only new/
+  // updated employees come back.
+  hrmsLastSyncDatetime: {
+    type: DataTypes.DATE,
+    field: 'hrms_last_sync_datetime',
+  },
+  hrmsLastSyncedCount: {
+    type: DataTypes.INTEGER,
+    field: 'hrms_last_synced_count',
+  },
+  hrmsLastSyncedAt: {
+    type: DataTypes.DATE,
+    field: 'hrms_last_synced_at',
+  },
+  hrmsLastSyncError: {
+    type: DataTypes.TEXT,
+    field: 'hrms_last_sync_error',
+  },
 }, {
   timestamps: true,
   underscored: true,

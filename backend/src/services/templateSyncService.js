@@ -57,7 +57,21 @@ async function findOrgAdmin(organizationId) {
  * @returns {Promise<{ inserted: number, updated: number, skipped: number, error?: string }>}
  */
 async function syncForOrg(organizationId) {
-  const stats = { inserted: 0, updated: 0, skipped: 0 };
+  // Treats Meta's /message_templates response as the source of truth for
+  // template IDENTITY fields (name + language) and approval STATUS, but
+  // preserves locally-edited CONTENT fields (body, header, cards, buttons,
+  // footer). Drift between local and Meta — the recurring cause of error
+  // 132001 — is reconciled in three ways every run:
+  //
+  //   1. Language code mismatches (e.g. local 'en' vs Meta 'en_US') →
+  //      overwrite local with Meta's value. Meta sets the language at
+  //      approval time; we don't get to choose it after that.
+  //   2. Templates that exist at Meta but not locally → insert.
+  //   3. Templates that exist locally as approved but Meta no longer has
+  //      them → mark `status='archived'` so they disappear from dropdowns
+  //      and any subsequent send fails fast with a clear message instead
+  //      of bubbling Meta's 132001.
+  const stats = { inserted: 0, updated: 0, skipped: 0, archived: 0, languageCorrected: 0 };
 
   const settings = await OrganizationSettings.findOne({ where: { organizationId } });
   if (!settings || !settings.whatsappBusinessAccountId || !settings.whatsappAccessToken) {
@@ -183,23 +197,64 @@ async function syncForOrg(organizationId) {
     };
 
     if (existing) {
-      // For templates that already exist locally, the user is the source of
-      // truth for the content (body, cards, buttons, etc.) — Meta only owns
-      // the approval status. Without this guard, the 15-min cron would race
-      // with user edits: a freshly added carousel card gets reset because
-      // Meta still has the old shape. Limit the sync to status fields only.
-      const statusOnlyUpdate = {
+      // Status + identity (language) come from Meta as source of truth;
+      // content (body, cards, buttons, …) is preserved as local-owned.
+      const reconcileUpdate = {
         whatsappStatus: 'approved',
         status: 'approved',
         whatsappRejectionReason: null,
         deletedAt: null,
       };
-      await existing.update(statusOnlyUpdate);
+      if (existing.language !== t.language) {
+        reconcileUpdate.language = t.language;
+        stats.languageCorrected++;
+        logger.info?.('Template sync: corrected language drift', {
+          organizationId,
+          name: t.name,
+          from: existing.language,
+          to: t.language,
+        });
+      }
+      await existing.update(reconcileUpdate);
       stats.updated++;
     } else {
       await Template.create({ ...data, createdBy, approvedAt: new Date() });
       stats.inserted++;
     }
+  }
+
+  // ---- Orphan reconciliation -------------------------------------------
+  // Any local row marked approved whose `name` is NOT in Meta's response
+  // is either deleted-at-Meta or renamed. Sending to it would always 404.
+  // Mark as 'archived' so it disappears from the dropdown and any pending
+  // queue items fail fast with a clear "template no longer exists" error
+  // rather than Meta's cryptic 132001.
+  const liveNames = new Set(fetched.filter((t) => t.status === 'APPROVED').map((t) => t.name));
+  const localApproved = await Template.findAll({
+    where: {
+      organizationId,
+      channel: 'whatsapp',
+      status: 'approved',
+      deletedAt: null,
+    },
+    attributes: ['id', 'name'],
+  });
+  const orphans = localApproved.filter((row) => !liveNames.has(row.name));
+  if (orphans.length > 0) {
+    const ids = orphans.map((r) => r.id);
+    await Template.update(
+      {
+        status: 'archived',
+        whatsappStatus: 'rejected',
+        whatsappRejectionReason: 'Template no longer exists at Meta (renamed, deleted, or removed). Re-create or recover it from Meta Business Manager.',
+      },
+      { where: { id: ids } }
+    );
+    stats.archived = orphans.length;
+    logger.warn('Template sync: archived orphans (not present at Meta)', {
+      organizationId,
+      names: orphans.map((r) => r.name),
+    });
   }
 
   logger.info?.('Template sync complete', { organizationId, ...stats });
@@ -219,19 +274,30 @@ async function syncForAllConfiguredOrgs() {
 
   let totalInserted = 0;
   let totalUpdated = 0;
+  let totalArchived = 0;
+  let totalLanguageCorrected = 0;
   let totalErrors = 0;
   for (const s of eligible) {
     try {
       const r = await syncForOrg(s.organizationId);
       totalInserted += r.inserted;
       totalUpdated += r.updated;
+      totalArchived += r.archived || 0;
+      totalLanguageCorrected += r.languageCorrected || 0;
       if (r.error) totalErrors++;
     } catch (e) {
       totalErrors++;
       logger.error?.('Template sync failed for org', { organizationId: s.organizationId, error: e.message });
     }
   }
-  return { orgsProcessed: eligible.length, inserted: totalInserted, updated: totalUpdated, errors: totalErrors };
+  return {
+    orgsProcessed: eligible.length,
+    inserted: totalInserted,
+    updated: totalUpdated,
+    archived: totalArchived,
+    languageCorrected: totalLanguageCorrected,
+    errors: totalErrors,
+  };
 }
 
 module.exports = { syncForOrg, syncForAllConfiguredOrgs };

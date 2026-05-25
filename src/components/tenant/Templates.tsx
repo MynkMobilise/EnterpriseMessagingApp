@@ -6,6 +6,7 @@ import { sanitizeInput } from '../../utils/security';
 import { apiService } from '../../utils/api';
 import { useOrganization } from '../../contexts/OrganizationContext';
 import { Pagination } from '../shared/Pagination';
+import { TemplatePreviewModal } from './TemplatePreviewModal';
 
 interface TemplatesProps {
   // Optional callback overrides — kept for callers that don't go through React Router.
@@ -53,6 +54,7 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [previewId, setPreviewId] = useState<number | null>(null);
 
   // Pull the latest WhatsApp templates from Meta into the local DB. The
   // background scheduler also does this every 15 min, but the button gives
@@ -416,7 +418,7 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="colorful p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -807,7 +809,7 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
                         )}
                         
                         <button
-                          onClick={() => toast.info('Preview feature coming soon')}
+                          onClick={() => setPreviewId(template.id)}
                           className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
                           title="Preview"
                         >
@@ -971,6 +973,13 @@ export function Templates({ onNavigateToCreate, onNavigateToEdit }: TemplatesPro
             </div>
           </div>
         </div>
+      )}
+
+      {previewId !== null && (
+        <TemplatePreviewModal
+          templateId={previewId}
+          onClose={() => setPreviewId(null)}
+        />
       )}
     </div>
   );

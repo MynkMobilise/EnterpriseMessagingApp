@@ -87,6 +87,13 @@ const Template = sequelize.define('templates', {
   variables: {
     type: DataTypes.JSON,
   },
+  // { "1": "John", "2": "ORD-123", "card1.1": "Vietnam" } — example values
+  // Meta needs to approve the template. Keys mirror `variables` for the
+  // top-level body, plus `card{N}.var` for per-card carousel body variables.
+  variableSamples: {
+    type: DataTypes.JSON,
+    field: 'variable_samples',
+  },
   variableCount: {
     type: DataTypes.INTEGER,
     defaultValue: 0,

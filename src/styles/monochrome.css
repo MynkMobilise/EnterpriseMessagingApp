@@ -1,0 +1,922 @@
+/*
+ * Monochrome theme — strict black/white/grayscale palette.
+ *
+ * Loaded AFTER index.css so utility-class overrides win the cascade.
+ * Centralizes the redesign in one file: edit values here to retune the
+ * whole app instead of touching component files.
+ *
+ * Strategy:
+ *   1. Redefine semantic CSS variables to pure neutrals.
+ *   2. Override every chromatic Tailwind utility (bg/text/border/ring for
+ *      blue/green/red/yellow/orange/purple/pink/indigo/teal/cyan/sky/
+ *      emerald/amber/rose/fuchsia/violet/lime/slate/stone/gray) → zinc.
+ *   3. Map "primary action" shades (bg-blue-600, bg-green-600, etc.) to
+ *      pure black so primary buttons feel editorial (Stripe/Linear).
+ *   4. Force imagery grayscale.
+ *   5. Type + radius globals to match the editorial vibe.
+ *
+ * Dark mode flips primary to white-on-near-black naturally because the
+ * .dark variant of every overridden utility is also remapped below.
+ */
+
+/* ============================================================
+ *  TOKENS
+ * ============================================================ */
+
+:root {
+  /* 10-step neutral scale (Tailwind zinc) */
+  --mono-50:  #FAFAFA;
+  --mono-100: #F4F4F5;
+  --mono-200: #E4E4E7;
+  --mono-300: #D4D4D8;
+  --mono-400: #A1A1AA;
+  --mono-500: #71717A;
+  --mono-600: #52525B;
+  --mono-700: #3F3F46;
+  --mono-800: #27272A;
+  --mono-900: #18181B;
+  --mono-950: #0A0A0A;
+  --mono-pure-black: #000000;
+  --mono-pure-white: #FFFFFF;
+
+  /* Semantic vars override the values defined in globals.css */
+  --background: var(--mono-pure-white);
+  --foreground: var(--mono-900);
+  --card: var(--mono-pure-white);
+  --card-foreground: var(--mono-900);
+  --popover: var(--mono-pure-white);
+  --popover-foreground: var(--mono-900);
+  --primary: var(--mono-pure-black);
+  --primary-foreground: var(--mono-pure-white);
+  --secondary: var(--mono-100);
+  --secondary-foreground: var(--mono-900);
+  --muted: var(--mono-100);
+  --muted-foreground: var(--mono-500);
+  --accent: var(--mono-100);
+  --accent-foreground: var(--mono-900);
+  --destructive: var(--mono-900);          /* no chromatic red, even for destructive */
+  --destructive-foreground: var(--mono-pure-white);
+  --border: var(--mono-200);
+  --input: var(--mono-200);
+  --input-background: var(--mono-50);
+  --switch-background: var(--mono-300);
+  --ring: var(--mono-900);
+  --chart-1: var(--mono-900);
+  --chart-2: var(--mono-600);
+  --chart-3: var(--mono-400);
+  --chart-4: var(--mono-300);
+  --chart-5: var(--mono-200);
+  --sidebar: var(--mono-pure-white);
+  --sidebar-foreground: var(--mono-900);
+  --sidebar-primary: var(--mono-pure-black);
+  --sidebar-primary-foreground: var(--mono-pure-white);
+  --sidebar-accent: var(--mono-100);
+  --sidebar-accent-foreground: var(--mono-900);
+  --sidebar-border: var(--mono-200);
+  --sidebar-ring: var(--mono-900);
+}
+
+.dark {
+  --background: var(--mono-950);
+  --foreground: var(--mono-pure-white);
+  --card: var(--mono-950);
+  --card-foreground: var(--mono-pure-white);
+  --popover: var(--mono-950);
+  --popover-foreground: var(--mono-pure-white);
+  --primary: var(--mono-pure-white);
+  --primary-foreground: var(--mono-pure-black);
+  --secondary: var(--mono-800);
+  --secondary-foreground: var(--mono-pure-white);
+  --muted: var(--mono-800);
+  --muted-foreground: var(--mono-400);
+  --accent: var(--mono-800);
+  --accent-foreground: var(--mono-pure-white);
+  --destructive: var(--mono-pure-white);
+  --destructive-foreground: var(--mono-pure-black);
+  --border: var(--mono-800);
+  --input: var(--mono-800);
+  --ring: var(--mono-pure-white);
+  --sidebar: var(--mono-950);
+  --sidebar-foreground: var(--mono-pure-white);
+  --sidebar-primary: var(--mono-pure-white);
+  --sidebar-primary-foreground: var(--mono-pure-black);
+  --sidebar-accent: var(--mono-800);
+  --sidebar-accent-foreground: var(--mono-pure-white);
+  --sidebar-border: var(--mono-800);
+  --sidebar-ring: var(--mono-pure-white);
+}
+
+/* ============================================================
+ *  TYPOGRAPHY
+ * ============================================================ */
+
+:root {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/**
+ * Compact root size — every rem-based value (Tailwind's text-sm/base/lg,
+ * padding p-2/p-4/p-6, gaps, button heights, …) scales relative to this.
+ * Default Tailwind assumes 16px; 14px makes the whole app ~12.5% denser
+ * without touching a single component file. Tweak this one value to
+ * retune overall density (13 = very compact, 15 = roomier).
+ */
+html {
+  font-size: 14px !important;
+}
+
+html,
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  line-height: 1.5;
+}
+
+/* Headings — slightly de-emphasize the largest scales since the base
+   font is smaller now and very-large text starts to feel disproportionate. */
+h1, h2, h3, h4, h5, h6 {
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  font-weight: 600;
+}
+.text-3xl { font-size: 1.625rem !important; }   /* ~23px instead of 26px */
+.text-4xl { font-size: 2rem !important; }       /* ~28px */
+.text-5xl { font-size: 2.5rem !important; }     /* ~35px */
+
+/* Button heights: cap heavy py-4 / py-3 on text buttons so primary actions
+   feel like editorial buttons (Stripe/Linear) instead of large slabs. */
+button.px-6.py-4,
+button.px-6.py-3 {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+}
+
+/* Tighter form-control padding so input rows aren't visually heavy. */
+input.px-4.py-3,
+textarea.px-4.py-3,
+select.px-4.py-3 {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
+
+/* Small uppercase labels for metadata, when authors mark them via class */
+.uppercase {
+  letter-spacing: 0.06em;
+}
+
+/* ============================================================
+ *  IMAGERY + ICONS — force grayscale
+ * ============================================================ */
+
+img:not([data-color]),
+video:not([data-color]),
+canvas:not([data-color]) {
+  filter: grayscale(100%);
+}
+
+/* Lucide / Heroicons / inline SVG icons inherit currentColor and are
+   single-color by nature, so they're already monochrome — but force-disable
+   any embedded hue just in case. */
+svg:not([data-color]) {
+  filter: grayscale(100%);
+}
+
+/* Common avatar gradient classes used throughout the app — neutralize. */
+.bg-gradient-to-br,
+.bg-gradient-to-r,
+.bg-gradient-to-l,
+.bg-gradient-to-tr,
+.bg-gradient-to-tl,
+.bg-gradient-to-bl,
+.bg-gradient-to-t,
+.bg-gradient-to-b {
+  background-image: linear-gradient(to bottom right, var(--mono-700), var(--mono-900)) !important;
+}
+.dark .bg-gradient-to-br,
+.dark .bg-gradient-to-r,
+.dark .bg-gradient-to-l,
+.dark .bg-gradient-to-tr,
+.dark .bg-gradient-to-tl,
+.dark .bg-gradient-to-bl,
+.dark .bg-gradient-to-t,
+.dark .bg-gradient-to-b {
+  background-image: linear-gradient(to bottom right, var(--mono-300), var(--mono-100)) !important;
+}
+
+/* ============================================================
+ *  COLOR UTILITY OVERRIDES
+ *
+ *  Every chromatic Tailwind utility (bg/text/border/ring/from/to/via)
+ *  for every hue + every shade is remapped to the equivalent zinc step.
+ *  Primary-action shades (600/700) map to pure black so primary buttons
+ *  feel editorial.
+ * ============================================================ */
+
+/* ---- background: -50 ------------------------------------- */
+.bg-slate-50, .bg-gray-50, .bg-stone-50,
+.bg-red-50, .bg-orange-50, .bg-amber-50, .bg-yellow-50,
+.bg-lime-50, .bg-green-50, .bg-emerald-50, .bg-teal-50,
+.bg-cyan-50, .bg-sky-50, .bg-blue-50, .bg-indigo-50,
+.bg-violet-50, .bg-purple-50, .bg-fuchsia-50, .bg-pink-50,
+.bg-rose-50 { background-color: var(--mono-50) !important; }
+
+/* ---- background: -100 ------------------------------------ */
+.bg-slate-100, .bg-gray-100, .bg-stone-100,
+.bg-red-100, .bg-orange-100, .bg-amber-100, .bg-yellow-100,
+.bg-lime-100, .bg-green-100, .bg-emerald-100, .bg-teal-100,
+.bg-cyan-100, .bg-sky-100, .bg-blue-100, .bg-indigo-100,
+.bg-violet-100, .bg-purple-100, .bg-fuchsia-100, .bg-pink-100,
+.bg-rose-100 { background-color: var(--mono-100) !important; }
+
+/* ---- background: -200 ------------------------------------ */
+.bg-slate-200, .bg-gray-200, .bg-stone-200,
+.bg-red-200, .bg-orange-200, .bg-amber-200, .bg-yellow-200,
+.bg-lime-200, .bg-green-200, .bg-emerald-200, .bg-teal-200,
+.bg-cyan-200, .bg-sky-200, .bg-blue-200, .bg-indigo-200,
+.bg-violet-200, .bg-purple-200, .bg-fuchsia-200, .bg-pink-200,
+.bg-rose-200 { background-color: var(--mono-200) !important; }
+
+/* ---- background: -300 ------------------------------------ */
+.bg-slate-300, .bg-gray-300, .bg-stone-300,
+.bg-red-300, .bg-orange-300, .bg-amber-300, .bg-yellow-300,
+.bg-lime-300, .bg-green-300, .bg-emerald-300, .bg-teal-300,
+.bg-cyan-300, .bg-sky-300, .bg-blue-300, .bg-indigo-300,
+.bg-violet-300, .bg-purple-300, .bg-fuchsia-300, .bg-pink-300,
+.bg-rose-300 { background-color: var(--mono-300) !important; }
+
+/* ---- background: -400 ------------------------------------ */
+.bg-slate-400, .bg-gray-400, .bg-stone-400,
+.bg-red-400, .bg-orange-400, .bg-amber-400, .bg-yellow-400,
+.bg-lime-400, .bg-green-400, .bg-emerald-400, .bg-teal-400,
+.bg-cyan-400, .bg-sky-400, .bg-blue-400, .bg-indigo-400,
+.bg-violet-400, .bg-purple-400, .bg-fuchsia-400, .bg-pink-400,
+.bg-rose-400 { background-color: var(--mono-400) !important; }
+
+/* ---- background: -500 ------------------------------------ */
+.bg-slate-500, .bg-gray-500, .bg-stone-500,
+.bg-red-500, .bg-orange-500, .bg-amber-500, .bg-yellow-500,
+.bg-lime-500, .bg-green-500, .bg-emerald-500, .bg-teal-500,
+.bg-cyan-500, .bg-sky-500, .bg-blue-500, .bg-indigo-500,
+.bg-violet-500, .bg-purple-500, .bg-fuchsia-500, .bg-pink-500,
+.bg-rose-500 { background-color: var(--mono-500) !important; }
+
+/* ---- background: -600 → PURE BLACK (primary action) ------ */
+.bg-red-600, .bg-orange-600, .bg-amber-600, .bg-yellow-600,
+.bg-lime-600, .bg-green-600, .bg-emerald-600, .bg-teal-600,
+.bg-cyan-600, .bg-sky-600, .bg-blue-600, .bg-indigo-600,
+.bg-violet-600, .bg-purple-600, .bg-fuchsia-600, .bg-pink-600,
+.bg-rose-600 { background-color: var(--mono-pure-black) !important; }
+
+.bg-slate-600, .bg-gray-600, .bg-stone-600 { background-color: var(--mono-600) !important; }
+
+.dark .bg-red-600, .dark .bg-orange-600, .dark .bg-amber-600, .dark .bg-yellow-600,
+.dark .bg-lime-600, .dark .bg-green-600, .dark .bg-emerald-600, .dark .bg-teal-600,
+.dark .bg-cyan-600, .dark .bg-sky-600, .dark .bg-blue-600, .dark .bg-indigo-600,
+.dark .bg-violet-600, .dark .bg-purple-600, .dark .bg-fuchsia-600, .dark .bg-pink-600,
+.dark .bg-rose-600 { background-color: var(--mono-pure-white) !important; color: var(--mono-pure-black) !important; }
+
+/* ---- background: -700 (primary hover) -------------------- */
+.bg-red-700, .bg-orange-700, .bg-amber-700, .bg-yellow-700,
+.bg-lime-700, .bg-green-700, .bg-emerald-700, .bg-teal-700,
+.bg-cyan-700, .bg-sky-700, .bg-blue-700, .bg-indigo-700,
+.bg-violet-700, .bg-purple-700, .bg-fuchsia-700, .bg-pink-700,
+.bg-rose-700 { background-color: var(--mono-800) !important; }
+
+.bg-slate-700, .bg-gray-700, .bg-stone-700 { background-color: var(--mono-700) !important; }
+
+.dark .bg-red-700, .dark .bg-orange-700, .dark .bg-amber-700, .dark .bg-yellow-700,
+.dark .bg-lime-700, .dark .bg-green-700, .dark .bg-emerald-700, .dark .bg-teal-700,
+.dark .bg-cyan-700, .dark .bg-sky-700, .dark .bg-blue-700, .dark .bg-indigo-700,
+.dark .bg-violet-700, .dark .bg-purple-700, .dark .bg-fuchsia-700, .dark .bg-pink-700,
+.dark .bg-rose-700 { background-color: var(--mono-200) !important; color: var(--mono-pure-black) !important; }
+
+/* ---- background: -800 ------------------------------------ */
+.bg-slate-800, .bg-gray-800, .bg-stone-800,
+.bg-red-800, .bg-orange-800, .bg-amber-800, .bg-yellow-800,
+.bg-lime-800, .bg-green-800, .bg-emerald-800, .bg-teal-800,
+.bg-cyan-800, .bg-sky-800, .bg-blue-800, .bg-indigo-800,
+.bg-violet-800, .bg-purple-800, .bg-fuchsia-800, .bg-pink-800,
+.bg-rose-800 { background-color: var(--mono-800) !important; }
+
+/* ---- background: -900 / -950 ----------------------------- */
+.bg-slate-900, .bg-gray-900, .bg-stone-900,
+.bg-red-900, .bg-orange-900, .bg-amber-900, .bg-yellow-900,
+.bg-lime-900, .bg-green-900, .bg-emerald-900, .bg-teal-900,
+.bg-cyan-900, .bg-sky-900, .bg-blue-900, .bg-indigo-900,
+.bg-violet-900, .bg-purple-900, .bg-fuchsia-900, .bg-pink-900,
+.bg-rose-900 { background-color: var(--mono-900) !important; }
+
+.bg-slate-950, .bg-gray-950, .bg-stone-950 { background-color: var(--mono-950) !important; }
+
+/* ---- background opacity / semi-transparent shades -------- */
+.bg-red-900\/20, .bg-orange-900\/20, .bg-yellow-900\/20, .bg-green-900\/20,
+.bg-emerald-900\/20, .bg-blue-900\/20, .bg-indigo-900\/20, .bg-purple-900\/20,
+.bg-pink-900\/20, .bg-rose-900\/20, .bg-amber-900\/20, .bg-teal-900\/20,
+.bg-cyan-900\/20, .bg-sky-900\/20, .bg-violet-900\/20, .bg-fuchsia-900\/20,
+.bg-lime-900\/20 { background-color: rgb(39 39 42 / 0.4) !important; }
+
+.bg-red-900\/30, .bg-orange-900\/30, .bg-yellow-900\/30, .bg-green-900\/30,
+.bg-emerald-900\/30, .bg-blue-900\/30, .bg-indigo-900\/30, .bg-purple-900\/30,
+.bg-pink-900\/30, .bg-rose-900\/30, .bg-amber-900\/30, .bg-teal-900\/30,
+.bg-cyan-900\/30, .bg-sky-900\/30, .bg-violet-900\/30, .bg-fuchsia-900\/30,
+.bg-lime-900\/30 { background-color: rgb(39 39 42 / 0.5) !important; }
+
+/* ============================================================
+ *  TEXT COLOR overrides
+ * ============================================================ */
+
+.text-slate-50, .text-gray-50, .text-stone-50,
+.text-red-50, .text-orange-50, .text-amber-50, .text-yellow-50,
+.text-lime-50, .text-green-50, .text-emerald-50, .text-teal-50,
+.text-cyan-50, .text-sky-50, .text-blue-50, .text-indigo-50,
+.text-violet-50, .text-purple-50, .text-fuchsia-50, .text-pink-50,
+.text-rose-50 { color: var(--mono-50) !important; }
+
+.text-slate-100, .text-gray-100, .text-stone-100,
+.text-red-100, .text-orange-100, .text-amber-100, .text-yellow-100,
+.text-lime-100, .text-green-100, .text-emerald-100, .text-teal-100,
+.text-cyan-100, .text-sky-100, .text-blue-100, .text-indigo-100,
+.text-violet-100, .text-purple-100, .text-fuchsia-100, .text-pink-100,
+.text-rose-100 { color: var(--mono-100) !important; }
+
+.text-slate-200, .text-gray-200, .text-stone-200,
+.text-red-200, .text-orange-200, .text-amber-200, .text-yellow-200,
+.text-lime-200, .text-green-200, .text-emerald-200, .text-teal-200,
+.text-cyan-200, .text-sky-200, .text-blue-200, .text-indigo-200,
+.text-violet-200, .text-purple-200, .text-fuchsia-200, .text-pink-200,
+.text-rose-200 { color: var(--mono-200) !important; }
+
+.text-slate-300, .text-gray-300, .text-stone-300,
+.text-red-300, .text-orange-300, .text-amber-300, .text-yellow-300,
+.text-lime-300, .text-green-300, .text-emerald-300, .text-teal-300,
+.text-cyan-300, .text-sky-300, .text-blue-300, .text-indigo-300,
+.text-violet-300, .text-purple-300, .text-fuchsia-300, .text-pink-300,
+.text-rose-300 { color: var(--mono-300) !important; }
+
+.text-slate-400, .text-gray-400, .text-stone-400,
+.text-red-400, .text-orange-400, .text-amber-400, .text-yellow-400,
+.text-lime-400, .text-green-400, .text-emerald-400, .text-teal-400,
+.text-cyan-400, .text-sky-400, .text-blue-400, .text-indigo-400,
+.text-violet-400, .text-purple-400, .text-fuchsia-400, .text-pink-400,
+.text-rose-400 { color: var(--mono-400) !important; }
+
+.text-slate-500, .text-gray-500, .text-stone-500,
+.text-red-500, .text-orange-500, .text-amber-500, .text-yellow-500,
+.text-lime-500, .text-green-500, .text-emerald-500, .text-teal-500,
+.text-cyan-500, .text-sky-500, .text-blue-500, .text-indigo-500,
+.text-violet-500, .text-purple-500, .text-fuchsia-500, .text-pink-500,
+.text-rose-500 { color: var(--mono-500) !important; }
+
+.text-slate-600, .text-gray-600, .text-stone-600,
+.text-red-600, .text-orange-600, .text-amber-600, .text-yellow-600,
+.text-lime-600, .text-green-600, .text-emerald-600, .text-teal-600,
+.text-cyan-600, .text-sky-600, .text-blue-600, .text-indigo-600,
+.text-violet-600, .text-purple-600, .text-fuchsia-600, .text-pink-600,
+.text-rose-600 { color: var(--mono-600) !important; }
+
+.text-slate-700, .text-gray-700, .text-stone-700,
+.text-red-700, .text-orange-700, .text-amber-700, .text-yellow-700,
+.text-lime-700, .text-green-700, .text-emerald-700, .text-teal-700,
+.text-cyan-700, .text-sky-700, .text-blue-700, .text-indigo-700,
+.text-violet-700, .text-purple-700, .text-fuchsia-700, .text-pink-700,
+.text-rose-700 { color: var(--mono-700) !important; }
+
+.text-slate-800, .text-gray-800, .text-stone-800,
+.text-red-800, .text-orange-800, .text-amber-800, .text-yellow-800,
+.text-lime-800, .text-green-800, .text-emerald-800, .text-teal-800,
+.text-cyan-800, .text-sky-800, .text-blue-800, .text-indigo-800,
+.text-violet-800, .text-purple-800, .text-fuchsia-800, .text-pink-800,
+.text-rose-800 { color: var(--mono-800) !important; }
+
+.text-slate-900, .text-gray-900, .text-stone-900,
+.text-red-900, .text-orange-900, .text-amber-900, .text-yellow-900,
+.text-lime-900, .text-green-900, .text-emerald-900, .text-teal-900,
+.text-cyan-900, .text-sky-900, .text-blue-900, .text-indigo-900,
+.text-violet-900, .text-purple-900, .text-fuchsia-900, .text-pink-900,
+.text-rose-900 { color: var(--mono-900) !important; }
+
+.text-slate-950, .text-gray-950, .text-stone-950 { color: var(--mono-950) !important; }
+
+/* ============================================================
+ *  BORDER COLOR overrides
+ * ============================================================ */
+
+.border-slate-200, .border-gray-200, .border-stone-200,
+.border-red-200, .border-orange-200, .border-amber-200, .border-yellow-200,
+.border-lime-200, .border-green-200, .border-emerald-200, .border-teal-200,
+.border-cyan-200, .border-sky-200, .border-blue-200, .border-indigo-200,
+.border-violet-200, .border-purple-200, .border-fuchsia-200, .border-pink-200,
+.border-rose-200 { border-color: var(--mono-200) !important; }
+
+.border-slate-300, .border-gray-300, .border-stone-300,
+.border-red-300, .border-orange-300, .border-amber-300, .border-yellow-300,
+.border-lime-300, .border-green-300, .border-emerald-300, .border-teal-300,
+.border-cyan-300, .border-sky-300, .border-blue-300, .border-indigo-300,
+.border-violet-300, .border-purple-300, .border-fuchsia-300, .border-pink-300,
+.border-rose-300 { border-color: var(--mono-300) !important; }
+
+.border-slate-400, .border-gray-400, .border-stone-400,
+.border-red-400, .border-orange-400, .border-amber-400, .border-yellow-400,
+.border-lime-400, .border-green-400, .border-emerald-400, .border-teal-400,
+.border-cyan-400, .border-sky-400, .border-blue-400, .border-indigo-400,
+.border-violet-400, .border-purple-400, .border-fuchsia-400, .border-pink-400,
+.border-rose-400 { border-color: var(--mono-400) !important; }
+
+.border-slate-500, .border-gray-500, .border-stone-500,
+.border-red-500, .border-orange-500, .border-amber-500, .border-yellow-500,
+.border-lime-500, .border-green-500, .border-emerald-500, .border-teal-500,
+.border-cyan-500, .border-sky-500, .border-blue-500, .border-indigo-500,
+.border-violet-500, .border-purple-500, .border-fuchsia-500, .border-pink-500,
+.border-rose-500 { border-color: var(--mono-500) !important; }
+
+.border-slate-600, .border-gray-600, .border-stone-600,
+.border-red-600, .border-orange-600, .border-amber-600, .border-yellow-600,
+.border-lime-600, .border-green-600, .border-emerald-600, .border-teal-600,
+.border-cyan-600, .border-sky-600, .border-blue-600, .border-indigo-600,
+.border-violet-600, .border-purple-600, .border-fuchsia-600, .border-pink-600,
+.border-rose-600 { border-color: var(--mono-900) !important; }
+
+.border-slate-700, .border-gray-700, .border-stone-700,
+.border-red-700, .border-orange-700, .border-amber-700, .border-yellow-700,
+.border-lime-700, .border-green-700, .border-emerald-700, .border-teal-700,
+.border-cyan-700, .border-sky-700, .border-blue-700, .border-indigo-700,
+.border-violet-700, .border-purple-700, .border-fuchsia-700, .border-pink-700,
+.border-rose-700 { border-color: var(--mono-700) !important; }
+
+.border-slate-800, .border-gray-800, .border-stone-800,
+.border-red-800, .border-orange-800, .border-amber-800, .border-yellow-800,
+.border-lime-800, .border-green-800, .border-emerald-800, .border-teal-800,
+.border-cyan-800, .border-sky-800, .border-blue-800, .border-indigo-800,
+.border-violet-800, .border-purple-800, .border-fuchsia-800, .border-pink-800,
+.border-rose-800 { border-color: var(--mono-800) !important; }
+
+/* ============================================================
+ *  RING / FOCUS overrides — use black/white, never colored
+ * ============================================================ */
+
+.ring-blue-500, .ring-blue-600,
+.ring-green-500, .ring-green-600,
+.ring-red-500, .ring-red-600,
+.ring-yellow-500, .ring-yellow-600,
+.ring-orange-500, .ring-orange-600,
+.ring-purple-500, .ring-purple-600,
+.ring-pink-500, .ring-pink-600,
+.ring-indigo-500, .ring-indigo-600,
+.ring-teal-500, .ring-teal-600,
+.ring-cyan-500, .ring-cyan-600,
+.ring-sky-500, .ring-sky-600,
+.ring-emerald-500, .ring-emerald-600,
+.ring-amber-500, .ring-amber-600,
+.ring-rose-500, .ring-rose-600,
+.ring-violet-500, .ring-violet-600,
+.ring-fuchsia-500, .ring-fuchsia-600,
+.ring-lime-500, .ring-lime-600 { --tw-ring-color: var(--mono-pure-black) !important; }
+
+.dark .ring-blue-500, .dark .ring-blue-600,
+.dark .ring-green-500, .dark .ring-green-600,
+.dark .ring-red-500, .dark .ring-red-600,
+.dark .ring-yellow-500, .dark .ring-yellow-600,
+.dark .ring-orange-500, .dark .ring-orange-600,
+.dark .ring-purple-500, .dark .ring-purple-600,
+.dark .ring-pink-500, .dark .ring-pink-600,
+.dark .ring-indigo-500, .dark .ring-indigo-600,
+.dark .ring-teal-500, .dark .ring-teal-600,
+.dark .ring-cyan-500, .dark .ring-cyan-600,
+.dark .ring-sky-500, .dark .ring-sky-600,
+.dark .ring-emerald-500, .dark .ring-emerald-600,
+.dark .ring-amber-500, .dark .ring-amber-600,
+.dark .ring-rose-500, .dark .ring-rose-600,
+.dark .ring-violet-500, .dark .ring-violet-600,
+.dark .ring-fuchsia-500, .dark .ring-fuchsia-600,
+.dark .ring-lime-500, .dark .ring-lime-600 { --tw-ring-color: var(--mono-pure-white) !important; }
+
+.focus\:ring-blue-500:focus, .focus\:ring-blue-600:focus,
+.focus\:ring-green-500:focus, .focus\:ring-green-600:focus,
+.focus\:ring-red-500:focus, .focus\:ring-red-600:focus,
+.focus\:ring-yellow-500:focus, .focus\:ring-yellow-600:focus,
+.focus\:ring-purple-500:focus, .focus\:ring-purple-600:focus,
+.focus\:ring-orange-500:focus, .focus\:ring-orange-600:focus,
+.focus\:ring-pink-500:focus, .focus\:ring-pink-600:focus { --tw-ring-color: var(--mono-pure-black) !important; }
+
+/* ============================================================
+ *  HOVER state overrides — collapse colored hovers to mono
+ * ============================================================ */
+
+.hover\:bg-blue-50:hover, .hover\:bg-green-50:hover, .hover\:bg-red-50:hover,
+.hover\:bg-yellow-50:hover, .hover\:bg-orange-50:hover, .hover\:bg-purple-50:hover,
+.hover\:bg-pink-50:hover, .hover\:bg-indigo-50:hover, .hover\:bg-teal-50:hover,
+.hover\:bg-cyan-50:hover, .hover\:bg-sky-50:hover, .hover\:bg-emerald-50:hover,
+.hover\:bg-amber-50:hover, .hover\:bg-rose-50:hover, .hover\:bg-violet-50:hover,
+.hover\:bg-fuchsia-50:hover, .hover\:bg-lime-50:hover { background-color: var(--mono-50) !important; }
+
+.hover\:bg-blue-100:hover, .hover\:bg-green-100:hover, .hover\:bg-red-100:hover,
+.hover\:bg-yellow-100:hover, .hover\:bg-orange-100:hover, .hover\:bg-purple-100:hover,
+.hover\:bg-pink-100:hover, .hover\:bg-indigo-100:hover, .hover\:bg-teal-100:hover,
+.hover\:bg-cyan-100:hover, .hover\:bg-sky-100:hover, .hover\:bg-emerald-100:hover,
+.hover\:bg-amber-100:hover, .hover\:bg-rose-100:hover, .hover\:bg-violet-100:hover,
+.hover\:bg-fuchsia-100:hover, .hover\:bg-lime-100:hover { background-color: var(--mono-100) !important; }
+
+.hover\:bg-blue-700:hover, .hover\:bg-green-700:hover, .hover\:bg-red-700:hover,
+.hover\:bg-yellow-700:hover, .hover\:bg-orange-700:hover, .hover\:bg-purple-700:hover,
+.hover\:bg-pink-700:hover, .hover\:bg-indigo-700:hover, .hover\:bg-teal-700:hover,
+.hover\:bg-cyan-700:hover, .hover\:bg-sky-700:hover, .hover\:bg-emerald-700:hover,
+.hover\:bg-amber-700:hover, .hover\:bg-rose-700:hover, .hover\:bg-violet-700:hover,
+.hover\:bg-fuchsia-700:hover, .hover\:bg-lime-700:hover { background-color: var(--mono-800) !important; }
+
+.dark .hover\:bg-blue-700:hover, .dark .hover\:bg-green-700:hover,
+.dark .hover\:bg-red-700:hover, .dark .hover\:bg-purple-700:hover,
+.dark .hover\:bg-orange-700:hover, .dark .hover\:bg-pink-700:hover {
+  background-color: var(--mono-200) !important;
+  color: var(--mono-pure-black) !important;
+}
+
+/* hover:text-* */
+.hover\:text-blue-600:hover, .hover\:text-blue-700:hover, .hover\:text-blue-800:hover,
+.hover\:text-green-600:hover, .hover\:text-green-700:hover, .hover\:text-green-800:hover,
+.hover\:text-red-600:hover, .hover\:text-red-700:hover, .hover\:text-red-800:hover {
+  color: var(--mono-pure-black) !important;
+}
+.dark .hover\:text-blue-600:hover, .dark .hover\:text-blue-700:hover,
+.dark .hover\:text-green-600:hover, .dark .hover\:text-green-700:hover,
+.dark .hover\:text-red-600:hover, .dark .hover\:text-red-700:hover {
+  color: var(--mono-pure-white) !important;
+}
+
+/* ============================================================
+ *  COMPONENT POLISH
+ *
+ *  Tighten radius, borders, focus styles — all opt-in via existing
+ *  Tailwind classes that components already use.
+ * ============================================================ */
+
+/* Buttons that have a black background read better with slight padding bump */
+button.bg-blue-600,
+button.bg-green-600,
+button.bg-purple-600,
+button.bg-orange-600,
+button.bg-indigo-600,
+button.bg-pink-600,
+button.bg-red-600 {
+  background-color: var(--mono-pure-black) !important;
+  color: var(--mono-pure-white) !important;
+  border: 1px solid var(--mono-pure-black);
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+
+button.bg-blue-600:hover,
+button.bg-green-600:hover,
+button.bg-purple-600:hover,
+button.bg-orange-600:hover,
+button.bg-indigo-600:hover,
+button.bg-pink-600:hover,
+button.bg-red-600:hover {
+  background-color: var(--mono-800) !important;
+}
+
+.dark button.bg-blue-600,
+.dark button.bg-green-600,
+.dark button.bg-purple-600,
+.dark button.bg-orange-600,
+.dark button.bg-indigo-600,
+.dark button.bg-pink-600,
+.dark button.bg-red-600 {
+  background-color: var(--mono-pure-white) !important;
+  color: var(--mono-pure-black) !important;
+  border-color: var(--mono-pure-white);
+}
+
+.dark button.bg-blue-600:hover,
+.dark button.bg-green-600:hover,
+.dark button.bg-purple-600:hover,
+.dark button.bg-orange-600:hover,
+.dark button.bg-indigo-600:hover,
+.dark button.bg-pink-600:hover,
+.dark button.bg-red-600:hover {
+  background-color: var(--mono-200) !important;
+}
+
+/* ============================================================
+ *  ARBITRARY-COLOR INLINE CLASSES used in LiveChat (WhatsApp greens)
+ *  Force them to monochrome.
+ * ============================================================ */
+
+.bg-\[\#e5ddd5\],
+.bg-\[\#efeae2\],
+.bg-\[\#d9fdd3\],
+.bg-\[\#dcf8c6\],
+.bg-\[\#f0f2f5\] { background-color: var(--mono-100) !important; }
+
+.bg-\[\#00a884\],
+.hover\:bg-\[\#017561\]:hover { background-color: var(--mono-pure-black) !important; }
+.dark .bg-\[\#00a884\],
+.dark .hover\:bg-\[\#017561\]:hover { background-color: var(--mono-pure-white) !important; color: var(--mono-pure-black) !important; }
+
+/* ============================================================
+ *  GLOBAL POLISH
+ * ============================================================ */
+
+/* Subtle 1px border using border color var */
+.border, .border-t, .border-r, .border-b, .border-l, .border-x, .border-y {
+  border-color: var(--border);
+}
+
+/* Smoother transitions on interactive elements */
+button, a, input, select, textarea {
+  transition: background-color 150ms ease-out, color 150ms ease-out,
+              border-color 150ms ease-out, box-shadow 150ms ease-out,
+              opacity 150ms ease-out;
+}
+
+/* No browser-default focus outlines — components define their own ring */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Selection color */
+::selection {
+  background-color: var(--mono-900);
+  color: var(--mono-pure-white);
+}
+.dark ::selection {
+  background-color: var(--mono-pure-white);
+  color: var(--mono-pure-black);
+}
+
+/* Scrollbars — thin editorial style
+ * 6px wide tracks, lighter thumb that darkens on hover. Works on
+ * webkit (Chrome/Safari/Edge) and Firefox (scrollbar-width). */
+* {
+  scrollbar-width: thin;                          /* Firefox */
+  scrollbar-color: var(--mono-300) transparent;   /* Firefox */
+}
+.dark * {
+  scrollbar-color: var(--mono-700) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--mono-300);
+  border-radius: 999px;
+}
+.dark ::-webkit-scrollbar-thumb { background: var(--mono-700); }
+::-webkit-scrollbar-thumb:hover { background: var(--mono-500); }
+.dark ::-webkit-scrollbar-thumb:hover { background: var(--mono-500); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ============================================================
+ *  COLORFUL ESCAPE HATCH — `.colorful` scope
+ *
+ *  Anything inside an element with class `colorful` opts out of the
+ *  monochrome cascade so the WhatsApp/SMS/Email previews render with
+ *  authentic brand colors. We override the same utilities monochrome.css
+ *  flattens above, using !important to beat them.
+ * ============================================================ */
+
+/* ─── Per-hue full palettes ──────────────────────────────────────────────
+ *  Each hue covers 50/100/200/300/400/500/600/700/800/900 for bg, text,
+ *  border, ring, and the gradient stop helpers (from/via/to). Dark-mode
+ *  variants restored too — without these, every `dark:bg-green-900/20`
+ *  card on a colored sidebar would still flatten to gray. */
+
+/* GREEN */
+.colorful .bg-green-50  { background-color: #f0fdf4 !important; }
+.colorful .bg-green-100 { background-color: #dcfce7 !important; }
+.colorful .bg-green-200 { background-color: #bbf7d0 !important; }
+.colorful .bg-green-300 { background-color: #86efac !important; }
+.colorful .bg-green-400 { background-color: #4ade80 !important; }
+.colorful .bg-green-500 { background-color: #22c55e !important; }
+.colorful .bg-green-600 { background-color: #16a34a !important; }
+.colorful .bg-green-700 { background-color: #15803d !important; }
+.colorful .bg-green-800 { background-color: #166534 !important; }
+.colorful .bg-green-900 { background-color: #14532d !important; }
+.colorful .text-green-50, .colorful .text-green-100 { color: #dcfce7 !important; }
+.colorful .text-green-200 { color: #bbf7d0 !important; }
+.colorful .text-green-300 { color: #86efac !important; }
+.colorful .text-green-400 { color: #4ade80 !important; }
+.colorful .text-green-500 { color: #22c55e !important; }
+.colorful .text-green-600 { color: #16a34a !important; }
+.colorful .text-green-700 { color: #15803d !important; }
+.colorful .text-green-800 { color: #166534 !important; }
+.colorful .text-green-900 { color: #14532d !important; }
+.colorful .border-green-200 { border-color: #bbf7d0 !important; }
+.colorful .border-green-300 { border-color: #86efac !important; }
+.colorful .border-green-600 { border-color: #16a34a !important; }
+.colorful .border-green-700 { border-color: #15803d !important; }
+.colorful .border-green-800 { border-color: #166534 !important; }
+.colorful .from-green-50, .colorful .from-green-100 { --tw-gradient-from: #f0fdf4 !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important; }
+.colorful .to-green-50  { --tw-gradient-to: #f0fdf4 !important; }
+.colorful .to-green-100 { --tw-gradient-to: #dcfce7 !important; }
+.colorful .to-green-200 { --tw-gradient-to: #bbf7d0 !important; }
+.dark .colorful .dark\:from-green-900\/20 { --tw-gradient-from: rgba(20,83,45,0.20) !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important; }
+.dark .colorful .dark\:to-green-800\/20   { --tw-gradient-to: rgba(22,101,52,0.20) !important; }
+.dark .colorful .dark\:border-green-800   { border-color: #166534 !important; }
+.dark .colorful .dark\:bg-green-900\/20   { background-color: rgba(20,83,45,0.20) !important; }
+.dark .colorful .dark\:bg-green-900\/40   { background-color: rgba(20,83,45,0.40) !important; }
+.dark .colorful .dark\:text-green-100, .dark .colorful .dark\:text-green-200, .dark .colorful .dark\:text-green-300 { color: #86efac !important; }
+.dark .colorful .dark\:text-green-400 { color: #4ade80 !important; }
+
+/* BLUE */
+.colorful .bg-blue-50   { background-color: #eff6ff !important; }
+.colorful .bg-blue-100  { background-color: #dbeafe !important; }
+.colorful .bg-blue-200  { background-color: #bfdbfe !important; }
+.colorful .bg-blue-300  { background-color: #93c5fd !important; }
+.colorful .bg-blue-400  { background-color: #60a5fa !important; }
+.colorful .bg-blue-500  { background-color: #3b82f6 !important; }
+.colorful .bg-blue-600  { background-color: #2563eb !important; }
+.colorful .bg-blue-700  { background-color: #1d4ed8 !important; }
+.colorful .bg-blue-800  { background-color: #1e40af !important; }
+.colorful .bg-blue-900  { background-color: #1e3a8a !important; }
+.colorful .text-blue-50, .colorful .text-blue-100 { color: #dbeafe !important; }
+.colorful .text-blue-200 { color: #bfdbfe !important; }
+.colorful .text-blue-300 { color: #93c5fd !important; }
+.colorful .text-blue-400 { color: #60a5fa !important; }
+.colorful .text-blue-500 { color: #3b82f6 !important; }
+.colorful .text-blue-600 { color: #2563eb !important; }
+.colorful .text-blue-700 { color: #1d4ed8 !important; }
+.colorful .text-blue-800 { color: #1e40af !important; }
+.colorful .text-blue-900 { color: #1e3a8a !important; }
+.colorful .border-blue-200 { border-color: #bfdbfe !important; }
+.colorful .border-blue-300 { border-color: #93c5fd !important; }
+.colorful .border-blue-600 { border-color: #2563eb !important; }
+.colorful .border-blue-700 { border-color: #1d4ed8 !important; }
+.colorful .border-blue-800 { border-color: #1e40af !important; }
+.colorful .from-blue-50, .colorful .from-blue-100 { --tw-gradient-from: #eff6ff !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important; }
+.colorful .to-blue-50  { --tw-gradient-to: #eff6ff !important; }
+.colorful .to-blue-100 { --tw-gradient-to: #dbeafe !important; }
+.colorful .to-blue-200 { --tw-gradient-to: #bfdbfe !important; }
+.dark .colorful .dark\:from-blue-900\/20 { --tw-gradient-from: rgba(30,58,138,0.20) !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important; }
+.dark .colorful .dark\:to-blue-800\/20   { --tw-gradient-to: rgba(30,64,175,0.20) !important; }
+.dark .colorful .dark\:border-blue-800   { border-color: #1e40af !important; }
+.dark .colorful .dark\:bg-blue-900\/20   { background-color: rgba(30,58,138,0.20) !important; }
+.dark .colorful .dark\:bg-blue-900\/40   { background-color: rgba(30,58,138,0.40) !important; }
+.dark .colorful .dark\:text-blue-100, .dark .colorful .dark\:text-blue-200, .dark .colorful .dark\:text-blue-300 { color: #93c5fd !important; }
+.dark .colorful .dark\:text-blue-400 { color: #60a5fa !important; }
+
+/* PURPLE */
+.colorful .bg-purple-50  { background-color: #faf5ff !important; }
+.colorful .bg-purple-100 { background-color: #f3e8ff !important; }
+.colorful .bg-purple-200 { background-color: #e9d5ff !important; }
+.colorful .bg-purple-300 { background-color: #d8b4fe !important; }
+.colorful .bg-purple-400 { background-color: #c084fc !important; }
+.colorful .bg-purple-500 { background-color: #a855f7 !important; }
+.colorful .bg-purple-600 { background-color: #9333ea !important; }
+.colorful .bg-purple-700 { background-color: #7e22ce !important; }
+.colorful .bg-purple-800 { background-color: #6b21a8 !important; }
+.colorful .bg-purple-900 { background-color: #581c87 !important; }
+.colorful .text-purple-50, .colorful .text-purple-100 { color: #f3e8ff !important; }
+.colorful .text-purple-200 { color: #e9d5ff !important; }
+.colorful .text-purple-300 { color: #d8b4fe !important; }
+.colorful .text-purple-400 { color: #c084fc !important; }
+.colorful .text-purple-500 { color: #a855f7 !important; }
+.colorful .text-purple-600 { color: #9333ea !important; }
+.colorful .text-purple-700 { color: #7e22ce !important; }
+.colorful .text-purple-800 { color: #6b21a8 !important; }
+.colorful .text-purple-900 { color: #581c87 !important; }
+.colorful .border-purple-200 { border-color: #e9d5ff !important; }
+.colorful .border-purple-600 { border-color: #9333ea !important; }
+.colorful .border-purple-800 { border-color: #6b21a8 !important; }
+.colorful .from-purple-50, .colorful .from-purple-100 { --tw-gradient-from: #faf5ff !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important; }
+.colorful .to-purple-100 { --tw-gradient-to: #f3e8ff !important; }
+.colorful .to-purple-200 { --tw-gradient-to: #e9d5ff !important; }
+.dark .colorful .dark\:from-purple-900\/20 { --tw-gradient-from: rgba(88,28,135,0.20) !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important; }
+.dark .colorful .dark\:to-purple-800\/20   { --tw-gradient-to: rgba(107,33,168,0.20) !important; }
+.dark .colorful .dark\:border-purple-800   { border-color: #6b21a8 !important; }
+.dark .colorful .dark\:bg-purple-900\/20   { background-color: rgba(88,28,135,0.20) !important; }
+.dark .colorful .dark\:bg-purple-900\/40   { background-color: rgba(88,28,135,0.40) !important; }
+.dark .colorful .dark\:text-purple-100, .dark .colorful .dark\:text-purple-200 { color: #e9d5ff !important; }
+.dark .colorful .dark\:text-purple-400 { color: #c084fc !important; }
+
+/* ORANGE */
+.colorful .bg-orange-50  { background-color: #fff7ed !important; }
+.colorful .bg-orange-100 { background-color: #ffedd5 !important; }
+.colorful .bg-orange-200 { background-color: #fed7aa !important; }
+.colorful .bg-orange-300 { background-color: #fdba74 !important; }
+.colorful .bg-orange-400 { background-color: #fb923c !important; }
+.colorful .bg-orange-500 { background-color: #f97316 !important; }
+.colorful .bg-orange-600 { background-color: #ea580c !important; }
+.colorful .bg-orange-700 { background-color: #c2410c !important; }
+.colorful .bg-orange-800 { background-color: #9a3412 !important; }
+.colorful .bg-orange-900 { background-color: #7c2d12 !important; }
+.colorful .text-orange-100 { color: #ffedd5 !important; }
+.colorful .text-orange-200 { color: #fed7aa !important; }
+.colorful .text-orange-400 { color: #fb923c !important; }
+.colorful .text-orange-500 { color: #f97316 !important; }
+.colorful .text-orange-600 { color: #ea580c !important; }
+.colorful .text-orange-700 { color: #c2410c !important; }
+.colorful .text-orange-800 { color: #9a3412 !important; }
+.colorful .text-orange-900 { color: #7c2d12 !important; }
+.colorful .border-orange-200 { border-color: #fed7aa !important; }
+.colorful .border-orange-600 { border-color: #ea580c !important; }
+.colorful .border-orange-800 { border-color: #9a3412 !important; }
+.colorful .from-orange-50, .colorful .from-orange-100 { --tw-gradient-from: #fff7ed !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important; }
+.colorful .to-orange-100 { --tw-gradient-to: #ffedd5 !important; }
+.colorful .to-orange-200 { --tw-gradient-to: #fed7aa !important; }
+.dark .colorful .dark\:from-orange-900\/20 { --tw-gradient-from: rgba(124,45,18,0.20) !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important; }
+.dark .colorful .dark\:to-orange-800\/20   { --tw-gradient-to: rgba(154,52,18,0.20) !important; }
+.dark .colorful .dark\:border-orange-800   { border-color: #9a3412 !important; }
+.dark .colorful .dark\:bg-orange-900\/20   { background-color: rgba(124,45,18,0.20) !important; }
+.dark .colorful .dark\:text-orange-100, .dark .colorful .dark\:text-orange-200 { color: #fed7aa !important; }
+.dark .colorful .dark\:text-orange-400 { color: #fb923c !important; }
+
+/* RED */
+.colorful .bg-red-50    { background-color: #fef2f2 !important; }
+.colorful .bg-red-100   { background-color: #fee2e2 !important; }
+.colorful .bg-red-200   { background-color: #fecaca !important; }
+.colorful .bg-red-500   { background-color: #ef4444 !important; }
+.colorful .bg-red-600   { background-color: #dc2626 !important; }
+.colorful .bg-red-700   { background-color: #b91c1c !important; }
+.colorful .text-red-400 { color: #f87171 !important; }
+.colorful .text-red-500 { color: #ef4444 !important; }
+.colorful .text-red-600 { color: #dc2626 !important; }
+.colorful .text-red-700 { color: #b91c1c !important; }
+.colorful .text-red-800 { color: #991b1b !important; }
+.colorful .border-red-200 { border-color: #fecaca !important; }
+.colorful .border-red-500 { border-color: #ef4444 !important; }
+.dark .colorful .dark\:bg-red-900\/20 { background-color: rgba(127,29,29,0.20) !important; }
+.dark .colorful .dark\:text-red-400 { color: #f87171 !important; }
+.dark .colorful .dark\:border-red-800 { border-color: #991b1b !important; }
+
+/* YELLOW / AMBER */
+.colorful .bg-yellow-50  { background-color: #fefce8 !important; }
+.colorful .bg-yellow-100 { background-color: #fef9c3 !important; }
+.colorful .bg-yellow-200 { background-color: #fef08a !important; }
+.colorful .bg-yellow-400 { background-color: #facc15 !important; }
+.colorful .bg-yellow-500 { background-color: #eab308 !important; }
+.colorful .bg-amber-50   { background-color: #fffbeb !important; }
+.colorful .bg-amber-100  { background-color: #fef3c7 !important; }
+.colorful .bg-amber-200  { background-color: #fde68a !important; }
+.colorful .text-yellow-500 { color: #eab308 !important; }
+.colorful .text-yellow-600 { color: #ca8a04 !important; }
+.colorful .text-yellow-700 { color: #a16207 !important; }
+.colorful .text-yellow-800 { color: #854d0e !important; }
+.colorful .text-amber-600  { color: #d97706 !important; }
+.colorful .text-amber-700  { color: #b45309 !important; }
+.colorful .border-yellow-200 { border-color: #fef08a !important; }
+.colorful .border-yellow-300 { border-color: #fde047 !important; }
+.dark .colorful .dark\:bg-yellow-900\/20 { background-color: rgba(113,63,18,0.20) !important; }
+.dark .colorful .dark\:text-yellow-400 { color: #facc15 !important; }
+.dark .colorful .dark\:border-yellow-800 { border-color: #854d0e !important; }
+
+/* PINK / ROSE / INDIGO / CYAN / SKY / TEAL / EMERALD — common decorative chips */
+.colorful .bg-pink-50  { background-color: #fdf2f8 !important; }
+.colorful .bg-pink-100 { background-color: #fce7f3 !important; }
+.colorful .text-pink-600 { color: #db2777 !important; }
+.colorful .bg-indigo-50  { background-color: #eef2ff !important; }
+.colorful .bg-indigo-100 { background-color: #e0e7ff !important; }
+.colorful .bg-indigo-500 { background-color: #6366f1 !important; }
+.colorful .bg-indigo-600 { background-color: #4f46e5 !important; }
+.colorful .text-indigo-500 { color: #6366f1 !important; }
+.colorful .text-indigo-600 { color: #4f46e5 !important; }
+.colorful .bg-cyan-50  { background-color: #ecfeff !important; }
+.colorful .bg-cyan-500 { background-color: #06b6d4 !important; }
+.colorful .text-cyan-600 { color: #0891b2 !important; }
+.colorful .bg-sky-50  { background-color: #f0f9ff !important; }
+.colorful .bg-sky-500 { background-color: #0ea5e9 !important; }
+.colorful .text-sky-600 { color: #0284c7 !important; }
+.colorful .bg-teal-50  { background-color: #f0fdfa !important; }
+.colorful .bg-teal-500 { background-color: #14b8a6 !important; }
+.colorful .text-teal-600 { color: #0d9488 !important; }
+.colorful .bg-emerald-50  { background-color: #ecfdf5 !important; }
+.colorful .bg-emerald-500 { background-color: #10b981 !important; }
+.colorful .text-emerald-500 { color: #10b981 !important; }
+.colorful .text-emerald-600 { color: #059669 !important; }
+.colorful .bg-rose-500 { background-color: #f43f5e !important; }
+.colorful .text-rose-500 { color: #f43f5e !important; }
+
+/* Ring colors — focus rings + outlines */
+.colorful .ring-blue-500\/40 { --tw-ring-color: rgba(59,130,246,0.40) !important; }
+.colorful .ring-blue-500 { --tw-ring-color: #3b82f6 !important; }
+.colorful .focus\:ring-blue-500:focus { --tw-ring-color: #3b82f6 !important; }
+.colorful .focus\:border-blue-500:focus { border-color: #3b82f6 !important; }
+
+/* Hover variants for colored buttons */
+.colorful .hover\:bg-blue-700:hover { background-color: #1d4ed8 !important; }
+.colorful .hover\:bg-green-700:hover { background-color: #15803d !important; }
+.colorful .hover\:bg-red-700:hover { background-color: #b91c1c !important; }
+.colorful .hover\:bg-purple-700:hover { background-color: #7e22ce !important; }
+.colorful .hover\:bg-orange-700:hover { background-color: #c2410c !important; }
+
+/* Force real white text inside colored chips/buttons */
+.colorful .text-white { color: #ffffff !important; }
+
+/* Let images, videos, and SVG charts render in full color inside .colorful
+ *  scopes (monochrome.css applies grayscale globally above). */
+.colorful img,
+.colorful video,
+.colorful svg { filter: none !important; }
+

@@ -238,7 +238,7 @@ export function MessageLogs() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="colorful p-6 space-y-6">
       {/* Page Header */}
       <div>
         <h1 className="text-2xl text-gray-900 dark:text-white">Message Logs</h1>

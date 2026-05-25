@@ -171,9 +171,23 @@ class AuthController {
         attributes: ['id', 'name', 'slug', 'plan', 'status', 'industry'],
       });
 
+      // Return the *merged* permissions (role defaults + per-user overrides) so
+      // the frontend's permission gating matches what the backend middleware
+      // actually enforces. Without this, a user whose stored permissions JSON
+      // predates a newly-added key (e.g. `canViewLiveChat`) would be hidden
+      // from menus their role is otherwise entitled to.
+      const mergedPermissions = {
+        ...authService.getDefaultPermissions(req.user.role),
+        ...(req.user.permissions || {}),
+      };
+
       res.json({
         success: true,
-        data: { ...user, organization: org ? org.toJSON() : null },
+        data: {
+          ...user,
+          permissions: mergedPermissions,
+          organization: org ? org.toJSON() : null,
+        },
       });
     } catch (error) {
       next(error);

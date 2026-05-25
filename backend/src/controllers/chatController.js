@@ -60,7 +60,13 @@ async function markRead(req, res, next) {
 
 async function webhookStatus(req, res, next) {
   try {
-    const data = await chatService.getWebhookStatus(req.user.organizationId);
+    // Reconstruct the public base URL from the request so the diagnostic can
+    // echo back the exact callback URL the operator should paste into Meta.
+    // Honor X-Forwarded-* headers because we're behind nginx in production.
+    const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https').toString().split(',')[0].trim();
+    const host = (req.headers['x-forwarded-host'] || req.headers.host || '').toString().split(',')[0].trim();
+    const publicBaseUrl = host ? `${proto}://${host}` : null;
+    const data = await chatService.getWebhookStatus(req.user.organizationId, { publicBaseUrl });
     res.json({ success: true, data });
   } catch (e) {
     next(e);

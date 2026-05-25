@@ -19,11 +19,18 @@ router.get('/:name', roleController.getByName);
 // Get users by role (requires user management permission)
 router.get('/:name/users', requirePermission('canManageUsers'), roleController.getUsersByRole);
 
-// Get role by name
-router.get('/:name', roleController.getByName);
-
-// Get users by role
-router.get('/:name/users', roleController.getUsersByRole);
+// Edit / reset per-org permission overrides — gated to admins who can assign
+// roles. super_admin is rejected inside the service.
+router.put(
+  '/:name/permissions',
+  requirePermission('canAssignRoles'),
+  roleController.updatePermissions
+);
+router.delete(
+  '/:name/permissions',
+  requirePermission('canAssignRoles'),
+  roleController.resetPermissions
+);
 
 module.exports = router;
 

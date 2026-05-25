@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Send, Clock, DollarSign, CheckCircle } from 'lucide-react';
+import { Send, Clock, IndianRupee, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../../../utils/api';
 import { useOrganization } from '../../../../contexts/OrganizationContext';
 import { SendModeSelector } from '../SendModeSelector';
 import { RecipientSelector } from '../shared/RecipientSelector';
 import { MessageComposer } from '../shared/MessageComposer';
-import type { SendMode, MessageType, Recipient, MessageData } from '../types';
+import type { SendMode, MessageType, Recipient, MessageData, Template } from '../types';
+import { estimateCost, formatINR, rateBreakdown } from '../../../../utils/pricing';
 
 export function SendSMSMessage() {
   const [sendMode, setSendMode] = useState<SendMode>('single');
@@ -22,8 +23,15 @@ export function SendSMSMessage() {
   const [scheduleMessage, setScheduleMessage] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
+  const [selectedTemplateData, setSelectedTemplateData] = useState<Template | null>(null);
 
   const { currentOrganization } = useOrganization();
+
+  // SMS pricing — transactional vs promotional. Falls back to template
+  // category when present; otherwise assume promotional (the safer/higher rate).
+  const recipientCount = sendMode === 'single' ? 1 : recipients.length;
+  const smsCategory = selectedTemplateData?.category || 'promotional';
+  const cost = estimateCost({ channel: 'sms', category: smsCategory, recipientCount });
 
   // Fetch available SMS providers
   useEffect(() => {
@@ -204,6 +212,7 @@ export function SendSMSMessage() {
             onTextMessageChange={setTextMessage}
             attachment={null}
             onAttachmentChange={() => {}}
+            onSelectedTemplateChange={setSelectedTemplateData}
           />
 
           {/* Advanced Options */}
@@ -249,18 +258,18 @@ export function SendSMSMessage() {
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Cost Estimate */}
-          <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl border border-blue-200 dark:border-blue-800 p-6">
+          <div className="colorful bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl border border-blue-200 dark:border-blue-800 p-6">
             <div className="flex items-start gap-3 mb-4">
-              <DollarSign className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+              <IndianRupee className="w-6 h-6 text-blue-600 dark:text-blue-400" />
               <div>
                 <h3 className="text-blue-900 dark:text-blue-100 mb-1">Estimated Cost</h3>
-                <p className="text-3xl text-blue-600 dark:text-blue-400">
-                  ${((sendMode === 'single' ? 1 : recipients.length) * 0.005).toFixed(3)}
-                </p>
+                <p className="text-3xl text-blue-600 dark:text-blue-400">{formatINR(cost)}</p>
               </div>
             </div>
             <div className="text-sm text-blue-800 dark:text-blue-200 space-y-1">
-              <p>Recipients: {sendMode === 'single' ? 1 : recipients.length}</p>
+              <p>Recipients: {recipientCount}</p>
+              <p className="capitalize">Type: {smsCategory}</p>
+              <p className="text-xs opacity-80 pt-1">{rateBreakdown({ channel: 'sms', category: smsCategory, recipientCount })}</p>
             </div>
           </div>
 

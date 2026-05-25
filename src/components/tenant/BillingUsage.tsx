@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Download } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { formatINR } from '../../utils/pricing';
 import { toast } from 'sonner@2.0.3';
 import { useOrganization } from '../../contexts/OrganizationContext';
 import { OrganizationBadge } from '../OrganizationBadge';
@@ -40,7 +41,7 @@ export function BillingUsage() {
   }, [currentOrganization]);
 
   return (
-    <div className="p-4 md:p-8">
+    <div className="colorful p-4 md:p-8">
       {/* Page Header */}
       <div className="mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
@@ -128,7 +129,7 @@ export function BillingUsage() {
                   <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div>
                   <span className="text-gray-700 dark:text-gray-300">{item.category}</span>
                 </div>
-                <span className="text-gray-900 dark:text-white">${item.cost.toFixed(2)}</span>
+                <span className="text-gray-900 dark:text-white">{formatINR(item.cost)}</span>
               </div>
             ))}
           </div>
@@ -170,12 +171,12 @@ export function BillingUsage() {
                 </td>
                 <td className="px-6 py-4">
                   <span className="text-sm text-gray-900 dark:text-white">
-                    ${country.cost.toFixed(2)}
+                    {formatINR(country.cost)}
                   </span>
                 </td>
                 <td className="px-6 py-4">
                   <span className="text-sm text-gray-600 dark:text-gray-400">
-                    ${(country.cost / country.messages).toFixed(4)}/msg
+                    {formatINR(country.cost / country.messages, { minDecimals: 4, maxDecimals: 4 })}/msg
                   </span>
                 </td>
               </tr>

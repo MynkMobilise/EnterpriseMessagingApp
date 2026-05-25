@@ -1,6 +1,7 @@
 const express = require('express');
 const contactController = require('../controllers/contactController');
 const contactImportController = require('../controllers/contactImportController');
+const hrmsController = require('../controllers/hrmsController');
 const { authenticate, requirePermission } = require('../middleware/auth');
 const { validate } = require('../middleware/validation');
 const { contactValidation } = require('../validations/contactValidation');
@@ -10,6 +11,24 @@ const router = express.Router();
 
 // All routes require authentication
 router.use(authenticate);
+
+// ---- HRMS routes (must come BEFORE /:id so they aren't swallowed) -------
+router.get('/hrms/config',
+  requirePermission('canManageContacts'),
+  hrmsController.getConfig
+);
+router.put('/hrms/config',
+  requirePermission('canManageContacts'),
+  hrmsController.updateConfig
+);
+router.post('/hrms/sync',
+  requirePermission('canManageContacts'),
+  hrmsController.syncNow
+);
+router.get('/hrms/template.csv',
+  requirePermission('canManageContacts'),
+  hrmsController.downloadTemplate
+);
 
 router.post('/',
   requirePermission('canManageContacts'),

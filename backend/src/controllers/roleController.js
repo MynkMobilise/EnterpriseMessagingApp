@@ -6,7 +6,7 @@ class RoleController {
    */
   list = async (req, res, next) => {
     try {
-      const roles = await roleService.getRoles();
+      const roles = await roleService.getRoles(req.organizationId);
       res.json({
         success: true,
         data: roles,
@@ -21,7 +21,7 @@ class RoleController {
    */
   getByName = async (req, res, next) => {
     try {
-      const role = await roleService.getRoleByName(req.params.name);
+      const role = await roleService.getRoleByName(req.params.name, req.organizationId);
       if (!role) {
         return res.status(404).json({
           success: false,
@@ -68,6 +68,40 @@ class RoleController {
         success: true,
         data: stats,
       });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * Replace this role's permissions for the caller's organization.
+   * Body: { permissions: { canSendMessages: true, ... } }
+   */
+  updatePermissions = async (req, res, next) => {
+    try {
+      const { permissions } = req.body || {};
+      const role = await roleService.updateRolePermissions(
+        req.params.name,
+        req.organizationId,
+        permissions,
+        req.user.id
+      );
+      res.json({ success: true, data: role, message: 'Permissions updated' });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * Remove the per-org override and fall back to code defaults.
+   */
+  resetPermissions = async (req, res, next) => {
+    try {
+      const role = await roleService.resetRolePermissions(
+        req.params.name,
+        req.organizationId
+      );
+      res.json({ success: true, data: role, message: 'Permissions reset to defaults' });
     } catch (error) {
       next(error);
     }

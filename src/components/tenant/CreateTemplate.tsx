@@ -29,7 +29,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiService } from '../../utils/api';
+import { apiService, MEDIA_HOST } from '../../utils/api';
 import { validateEmail, validatePhone } from '../../utils/security';
 
 interface CreateTemplateProps {
@@ -66,6 +66,27 @@ function makeId(prefix = ''): string {
   return `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * Substitute {{n}} placeholders in body text with the user's sample values
+ * so the live preview shows a realistic message. Falls back to leaving the
+ * placeholder visible when no sample is provided yet.
+ *
+ *   - For standard templates, samples are keyed "1", "2", …
+ *   - For carousel per-card bodies, pass prefix "card1.", "card2.", …
+ *     and samples are keyed "card1.1", "card2.1", etc.
+ */
+function applySamples(
+  text: string,
+  samples: Record<string, string>,
+  prefix: string = '',
+): string {
+  if (!text) return text;
+  return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, varName) => {
+    const v = samples?.[prefix + varName];
+    return typeof v === 'string' && v.length > 0 ? v : match;
+  });
+}
+
 export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: CreateTemplateProps) {
   const navigate = useNavigate();
   const params = useParams<{ id?: string }>();
@@ -92,6 +113,12 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
   // Body
   const [bodyText, setBodyText] = useState('');
   const [variables, setVariables] = useState<string[]>([]);
+  // Sample values for each {{n}} placeholder — sent to Meta as
+  // `example.body_text` so reviewers can see what real content will look
+  // like. Keyed by the variable name (e.g. "1", "2" — or "card1.1" for
+  // carousel per-card variables). Empty values fall back to "Sample N"
+  // at submission time so Meta always has something to display.
+  const [variableSamples, setVariableSamples] = useState({} as Record<string, string>);
 
   // Email/FCM specific fields
   const [subject, setSubject] = useState('');
@@ -183,6 +210,12 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
         // Set variables
         if (Array.isArray(template.variables)) {
           setVariables(template.variables);
+        }
+        // Hydrate user-provided sample values for each placeholder so they
+        // show in the input fields and Meta sees the same examples on
+        // re-submission. Stored as a JSON object keyed by variable name.
+        if (template.variableSamples && typeof template.variableSamples === 'object') {
+          setVariableSamples(template.variableSamples);
         }
         
         // WhatsApp-specific fields
@@ -369,9 +402,42 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
       }
     }
 
-    if (channel === 'whatsapp' && templateType === 'carousel' && carouselCards.some((card) => !card.content)) {
-      toast.error('All carousel cards must have content');
-      return;
+    // ---- WhatsApp-specific pre-save validation ------------------------
+    // These checks surface up-front so the user doesn't get a generic 400
+    // from the backend or a confusing Meta-side rejection later.
+    if (channel === 'whatsapp') {
+      // 1) Media headers must have an uploaded file. headerText holds the
+      //    uploaded media URL for media-typed headers; if it's empty, the
+      //    user picked the type but never uploaded.
+      if (templateType === 'standard' && ['image', 'video', 'document'].includes(headerType)) {
+        if (!headerText) {
+          toast.error(`Upload the ${headerType} file for the header`, {
+            description: `Or change header type to "None" or "Text" if you don't need media.`,
+          });
+          return;
+        }
+      }
+
+      // 2) Carousel: each card must have content AND media. Cards with
+      //    null media can be saved locally (as draft) but never accepted
+      //    by Meta — flag it now so the user knows.
+      if (templateType === 'carousel') {
+        for (let i = 0; i < carouselCards.length; i++) {
+          const c = carouselCards[i];
+          if (!c.content) {
+            toast.error(`Card ${i + 1} is missing content`, {
+              description: 'Each card needs body text.',
+            });
+            return;
+          }
+          if (!c.media || !c.media.url) {
+            toast.error(`Card ${i + 1} is missing an image/video`, {
+              description: 'Click the upload icon on the card to add media.',
+            });
+            return;
+          }
+        }
+      }
     }
 
     try {
@@ -382,6 +448,24 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
         language,
         body: bodyText,
         variables: variables,
+        // Only send keys that map to placeholders actually present in the
+        // body (or a per-card body, prefixed `card{N}.`). Stale samples
+        // from deleted vars would otherwise bloat the payload.
+        variableSamples: (() => {
+          if (!variableSamples || Object.keys(variableSamples).length === 0) return undefined;
+          const validKeys = new Set<string>();
+          const bodyMatches = [...(bodyText || '').matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)];
+          bodyMatches.forEach((m) => validKeys.add(m[1]));
+          carouselCards.forEach((c: any, idx: number) => {
+            const m = [...((c.content || '').matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g))];
+            m.forEach((mm: any) => validKeys.add(`card${idx + 1}.${mm[1]}`));
+          });
+          const out: Record<string, string> = {};
+          Object.keys(variableSamples).forEach((k) => {
+            if (validKeys.has(k)) out[k] = variableSamples[k];
+          });
+          return Object.keys(out).length > 0 ? out : undefined;
+        })(),
       };
 
       // Channel-specific fields
@@ -467,9 +551,19 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
         }
       }
     } catch (error: any) {
+      // Surface backend field-level validation errors (Joi returns
+      // { details: { 'cards.0.media.url': '"url" is not allowed to be empty' } })
+      // so the user sees exactly which field rejected the payload.
+      const errObj = error?.response?.data?.error;
+      let detail = error.response?.data?.error?.message || error.message;
+      if (errObj?.details && typeof errObj.details === 'object') {
+        const lines = Object.entries(errObj.details).map(([k, v]) => `• ${k}: ${v}`);
+        if (lines.length > 0) detail = lines.join('\n');
+      }
       toast.error(`Failed to ${isEditMode ? 'update' : 'create'} template`, {
-        description: error.response?.data?.error?.message || error.message,
+        description: detail,
         id: isEditMode ? 'update-template' : 'create-template',
+        duration: 8000,
       });
     }
   };
@@ -888,7 +982,7 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
                           <Upload className="w-12 h-12 text-gray-400 mx-auto mb-3" />
                           <label className="cursor-pointer">
                             <span className="text-sm text-blue-600 hover:text-blue-700">
-                              {headerContent ? `Replace ${headerType}` : `Upload ${headerType}`}
+                              {headerText ? `Replace ${headerType}` : `Upload ${headerType}`}
                             </span>
                             <input
                               type="file"
@@ -988,6 +1082,53 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
                         </p>
                         <p className="text-xs text-gray-500">{bodyText.length} / 1024</p>
                       </div>
+
+                      {/* Per-variable sample inputs — sent to Meta as
+                          `example.body_text` so the reviewer sees real-looking
+                          content during approval. Required by Meta whenever
+                          the body contains {{n}} placeholders. */}
+                      {(() => {
+                        const matches = [...(bodyText || '').matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)];
+                        const uniq = Array.from(new Set(matches.map((m) => m[1])));
+                        if (uniq.length === 0) return null;
+                        const prefix = templateType === 'carousel' ? '' : '';
+                        return (
+                          <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                            <div className="flex items-start justify-between mb-2">
+                              <div>
+                                <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Sample values</p>
+                                <p className="text-[11px] text-gray-500 mt-0.5">
+                                  Meta uses these examples to review your template. Provide a realistic value for each placeholder.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              {uniq.map((varName) => (
+                                <div key={varName} className="grid grid-cols-[100px_1fr] gap-2 items-center">
+                                  <label className="text-xs text-gray-600 dark:text-gray-400 font-mono">
+                                    {`{{${varName}}}`}
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={variableSamples[prefix + varName] || ''}
+                                    onChange={(e: any) =>
+                                      setVariableSamples({
+                                        ...variableSamples,
+                                        [prefix + varName]: e.target.value,
+                                      })
+                                    }
+                                    placeholder={`Example for {{${varName}}} (e.g. "John")`}
+                                    className="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                            <p className="text-[11px] text-gray-400 mt-2">
+                              Left blank? We'll send "Sample 1", "Sample 2", … to Meta so the template still passes review.
+                            </p>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -1820,7 +1961,7 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
 
           {/* Preview Panel */}
           {showPreview && (
-            <div className="w-96 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex-shrink-0 overflow-y-auto">
+            <div className="colorful w-96 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex-shrink-0 overflow-y-auto">
               <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 z-10">
                 <h3 className="text-base text-gray-900 dark:text-white flex items-center gap-2">
                   <Eye className="w-5 h-5 text-blue-600" />
@@ -1832,6 +1973,58 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
               </div>
 
               <div className="p-6">
+                {/* Focused Template Preview — shows the body with sample
+                    values substituted live, plus an inline editor for each
+                    {{n}} placeholder. Mirrors the layout used in Send
+                    Message's MessageComposer so what you preview here matches
+                    what your operators will fill in later. */}
+                {(() => {
+                  const previewBody = bodyText || '';
+                  const matches = [...previewBody.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)];
+                  const uniqVars = Array.from(new Set(matches.map((m) => m[1])));
+                  if (!previewBody) return null;
+                  return (
+                    <div className="mb-6 rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/40">
+                      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-800">
+                        <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                          Template Preview
+                        </p>
+                      </div>
+                      <div className="p-4 space-y-4">
+                        <p className="text-sm text-gray-900 dark:text-white whitespace-pre-wrap">
+                          {applySamples(previewBody, variableSamples)}
+                        </p>
+                        {uniqVars.length > 0 && (
+                          <div className="pt-3 border-t border-gray-200 dark:border-gray-800 space-y-2">
+                            <p className="text-xs text-gray-600 dark:text-gray-400">
+                              Fill in template variables
+                            </p>
+                            {uniqVars.map((varName) => (
+                              <div key={varName} className="space-y-1">
+                                <label className="block text-xs text-gray-500 dark:text-gray-400 font-mono">
+                                  {varName}
+                                </label>
+                                <input
+                                  type="text"
+                                  value={variableSamples[varName] || ''}
+                                  onChange={(e: any) =>
+                                    setVariableSamples({
+                                      ...variableSamples,
+                                      [varName]: e.target.value,
+                                    })
+                                  }
+                                  placeholder={`Enter ${varName}`}
+                                  className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {channel === 'whatsapp' ? (
                   /* WhatsApp Preview */
                   <div className="bg-gradient-to-b from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-2xl p-4 shadow-lg border border-green-200 dark:border-green-800">
@@ -1854,15 +2047,44 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
                         {/* Header */}
                         {headerType === 'text' && headerText && (
                           <div className="pb-2 border-b border-gray-200 dark:border-gray-600">
-                            <p className="text-sm text-gray-900 dark:text-white">{headerText}</p>
+                            <p className="text-sm text-gray-900 dark:text-white">
+                              {applySamples(headerText, variableSamples)}
+                            </p>
                           </div>
                         )}
-                        {(headerType === 'image' || headerType === 'video') && (
-                          <div className="w-full h-32 bg-gray-200 dark:bg-gray-600 rounded-lg flex items-center justify-center">
-                            {headerType === 'image' ? (
+                        {(headerType === 'image' || headerType === 'video' || headerType === 'document') && (
+                          <div className="w-full h-32 bg-gray-200 dark:bg-gray-600 rounded-lg flex items-center justify-center overflow-hidden">
+                            {/* headerText doubles as the uploaded media URL
+                                when the header type is media. If present and
+                                looks like a URL, render the actual asset;
+                                otherwise fall back to the placeholder icon. */}
+                            {headerText && /^(https?:|\/uploads\/)/i.test(headerText) ? (
+                              headerType === 'image' ? (
+                                <img
+                                  src={headerText.startsWith('http') ? headerText : `${MEDIA_HOST}${headerText}`}
+                                  alt="Header preview"
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : headerType === 'video' ? (
+                                <video
+                                  src={headerText.startsWith('http') ? headerText : `${MEDIA_HOST}${headerText}`}
+                                  className="w-full h-full object-cover"
+                                  muted
+                                />
+                              ) : (
+                                <div className="flex flex-col items-center text-gray-500">
+                                  <FileText className="w-10 h-10" />
+                                  <span className="text-[10px] mt-1 truncate max-w-[140px]">
+                                    {headerText.split('/').pop()}
+                                  </span>
+                                </div>
+                              )
+                            ) : headerType === 'image' ? (
                               <ImageIcon className="w-10 h-10 text-gray-400" />
-                            ) : (
+                            ) : headerType === 'video' ? (
                               <Video className="w-10 h-10 text-gray-400" />
+                            ) : (
+                              <FileText className="w-10 h-10 text-gray-400" />
                             )}
                           </div>
                         )}
@@ -1874,13 +2096,13 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
                               {activeCard?.media?.url ? (
                                 activeCard.media.type === 'video' ? (
                                   <video
-                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'https://suchna.onmobilise.com'}${activeCard.media.url}`}
+                                    src={activeCard.media.url.startsWith('http') ? activeCard.media.url : `${MEDIA_HOST}${activeCard.media.url}`}
                                     className="w-full h-full object-cover"
                                     muted
                                   />
                                 ) : (
                                   <img
-                                    src={`${(import.meta as any).env?.VITE_API_BASE_URL || 'https://suchna.onmobilise.com'}${activeCard.media.url}`}
+                                    src={activeCard.media.url.startsWith('http') ? activeCard.media.url : `${MEDIA_HOST}${activeCard.media.url}`}
                                     alt="Card media"
                                     className="w-full h-full object-cover"
                                   />
@@ -1892,7 +2114,11 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
                               )}
                             </div>
                             <p className="text-xs text-gray-900 dark:text-white whitespace-pre-wrap">
-                              {activeCard?.content || 'Card content...'}
+                              {applySamples(
+                                activeCard?.content || 'Card content...',
+                                variableSamples,
+                                `card${activeCardIndex + 1}.`,
+                              )}
                             </p>
                             <p className="text-xs text-gray-500 text-center">
                               {activeCardIndex + 1} of {carouselCards.length}
@@ -1900,7 +2126,10 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
                           </div>
                         ) : (
                           <p className="text-xs text-gray-900 dark:text-white whitespace-pre-wrap">
-                            {bodyText || 'Your message content will appear here...'}
+                            {applySamples(
+                              bodyText || 'Your message content will appear here...',
+                              variableSamples,
+                            )}
                           </p>
                         )}
 
@@ -1968,7 +2197,7 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
                       <div className="bg-gray-100 dark:bg-gray-800 p-4 min-h-[300px]">
                         <div className="bg-green-600 text-white rounded-2xl rounded-bl-sm p-3 shadow-sm max-w-[85%] space-y-1">
                           <p className="text-xs whitespace-pre-wrap">
-                            {bodyText || 'Your SMS message will appear here...'}
+                            {applySamples(bodyText || 'Your SMS message will appear here...', variableSamples)}
                           </p>
                           <p className="text-xs opacity-75 text-right">
                             <Clock className="w-3 h-3 inline mr-1" />
@@ -2034,10 +2263,10 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
                       </div>
                       <div className="prose prose-sm dark:prose-invert max-w-none">
                         {htmlBody ? (
-                          <div dangerouslySetInnerHTML={{ __html: htmlBody || '<p>Your HTML email content will appear here...</p>' }} />
+                          <div dangerouslySetInnerHTML={{ __html: applySamples(htmlBody, variableSamples) || '<p>Your HTML email content will appear here...</p>' }} />
                         ) : (
                           <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                            {plainTextBody || 'Your plain text email content will appear here...'}
+                            {applySamples(plainTextBody || 'Your plain text email content will appear here...', variableSamples)}
                           </div>
                         )}
                       </div>
@@ -2054,10 +2283,10 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
                           </div>
                           <div className="flex-1">
                             <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">
-                              {subject || 'Notification Title'}
+                              {applySamples(subject || 'Notification Title', variableSamples)}
                             </h3>
                             <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
-                              {bodyText || 'Your notification message will appear here...'}
+                              {applySamples(bodyText || 'Your notification message will appear here...', variableSamples)}
                             </p>
                           </div>
                         </div>

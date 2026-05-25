@@ -8,6 +8,8 @@ const ApiKeyUsageLog = require('./ApiKeyUsageLog');
 const Contact = require('./Contact');
 const ContactGroup = require('./ContactGroup');
 const ContactGroupMembership = require('./ContactGroupMembership');
+const ContactGroupUserAssignment = require('./ContactGroupUserAssignment');
+const OrganizationRolePermissions = require('./OrganizationRolePermissions');
 const ContactImport = require('./ContactImport');
 const Template = require('./Template');
 const TemplateImport = require('./TemplateImport');
@@ -154,6 +156,31 @@ ContactGroup.belongsToMany(Contact, {
   as: 'contacts',
 });
 
+// Contact Group ↔ User (operator) assignments
+ContactGroup.belongsToMany(User, {
+  through: ContactGroupUserAssignment,
+  foreignKey: 'groupId',
+  otherKey: 'userId',
+  as: 'assignedUsers',
+});
+
+User.belongsToMany(ContactGroup, {
+  through: ContactGroupUserAssignment,
+  foreignKey: 'userId',
+  otherKey: 'groupId',
+  as: 'assignedContactGroups',
+});
+
+ContactGroupUserAssignment.belongsTo(ContactGroup, {
+  foreignKey: 'groupId',
+  as: 'group',
+});
+
+ContactGroupUserAssignment.belongsTo(User, {
+  foreignKey: 'userId',
+  as: 'user',
+});
+
 // Organization - Templates relationship
 Organization.hasMany(Template, {
   foreignKey: 'organizationId',
@@ -207,6 +234,17 @@ Template.hasMany(Message, {
 Message.belongsTo(Template, {
   foreignKey: 'templateId',
   as: 'template',
+});
+
+// Message - Sender (User) relationship — for leadership dashboard joins
+Message.belongsTo(User, {
+  foreignKey: 'sentBy',
+  as: 'sender',
+});
+
+User.hasMany(Message, {
+  foreignKey: 'sentBy',
+  as: 'sentMessages',
 });
 
 // Message - Events relationship
@@ -286,6 +324,8 @@ module.exports = {
   Contact,
   ContactGroup,
   ContactGroupMembership,
+  ContactGroupUserAssignment,
+  OrganizationRolePermissions,
   ContactImport,
   Template,
   TemplateImport,

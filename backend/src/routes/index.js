@@ -17,6 +17,7 @@ const smsConfigurationRoutes = require('./smsConfigurations');
 const migrationRoutes = require('./migration');
 const chatRoutes = require('./chat');
 const integrationRoutes = require('./integrations');
+const dashboardRoutes = require('./dashboard');
 
 const router = express.Router();
 
@@ -39,6 +40,7 @@ router.use('/sms-configurations', smsConfigurationRoutes);
 router.use('/migration', migrationRoutes);
 router.use('/chat', chatRoutes);
 router.use('/integrations', integrationRoutes);
+router.use('/dashboard', dashboardRoutes);
 
 module.exports = router;
 

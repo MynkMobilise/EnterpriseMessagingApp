@@ -88,7 +88,7 @@ export function WebhookEvents() {
   }), [events]);
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto">
+    <div className="colorful p-4 md:p-8 max-w-7xl mx-auto">
       <div className="mb-6 flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl text-gray-900 dark:text-white">Webhook Events</h1>

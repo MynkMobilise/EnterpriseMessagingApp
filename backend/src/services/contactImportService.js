@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { Contact, ContactImport } = require('../models');
 const contactService = require('./contactService');
+const hrmsSyncService = require('./hrmsSyncService');
 const { Op } = require('sequelize');
 
 class ContactImportService {
@@ -44,6 +45,32 @@ class ContactImportService {
               
               for (const row of batch) {
                 try {
+                  // Detect format: HRMS-shaped rows have `employee_id` or
+                  // `db_id` / `employee_name`. If present, route through the
+                  // shared HRMS mapper + upsert so Excel + API + manual all
+                  // use the same field-to-column mapping.
+                  const isHrmsRow =
+                    row.employee_id !== undefined ||
+                    row.db_id !== undefined ||
+                    row.employee_name !== undefined;
+
+                  if (isHrmsRow) {
+                    const r = await hrmsSyncService.upsertOne(
+                      organizationId, importedBy, row, 'excel'
+                    );
+                    if (r.action === 'inserted' || r.action === 'updated') {
+                      successfulImports++;
+                    } else {
+                      failedImports++;
+                      errors.push({
+                        row: totalRows - batch.length + batch.indexOf(row) + 1,
+                        error: r.error || 'Could not map row',
+                      });
+                    }
+                    continue;
+                  }
+
+                  // Legacy plain-CSV path (phone/name/email/...).
                   const phoneNumber = row.phone || row.phoneNumber || row.phone_number;
                   if (!phoneNumber) {
                     failedImports++;

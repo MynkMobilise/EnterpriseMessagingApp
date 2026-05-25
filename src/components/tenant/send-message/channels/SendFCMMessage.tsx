@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Send, Clock, DollarSign, CheckCircle } from 'lucide-react';
+import { Send, Clock, IndianRupee, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../../../utils/api';
 import { SendModeSelector } from '../SendModeSelector';
 import { RecipientSelector } from '../shared/RecipientSelector';
 import { MessageComposer } from '../shared/MessageComposer';
 import type { SendMode, MessageType, Recipient, MessageData } from '../types';
+import { estimateCost, formatINR } from '../../../../utils/pricing';
 
 export function SendFCMMessage() {
   const [sendMode, setSendMode] = useState<SendMode>('single');
@@ -224,20 +225,25 @@ export function SendFCMMessage() {
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Cost Estimate */}
-          <div className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-xl border border-orange-200 dark:border-orange-800 p-6">
-            <div className="flex items-start gap-3 mb-4">
-              <DollarSign className="w-6 h-6 text-orange-600 dark:text-orange-400" />
-              <div>
-                <h3 className="text-orange-900 dark:text-orange-100 mb-1">Estimated Cost</h3>
-                <p className="text-3xl text-orange-600 dark:text-orange-400">
-                  ${((sendMode === 'single' ? 1 : recipients.length) * 0.0001).toFixed(4)}
-                </p>
+          {(() => {
+            const recipientCount = sendMode === 'single' ? 1 : recipients.length;
+            const cost = estimateCost({ channel: 'fcm', recipientCount });
+            return (
+              <div className="colorful bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-xl border border-orange-200 dark:border-orange-800 p-6">
+                <div className="flex items-start gap-3 mb-4">
+                  <IndianRupee className="w-6 h-6 text-orange-600 dark:text-orange-400" />
+                  <div>
+                    <h3 className="text-orange-900 dark:text-orange-100 mb-1">Estimated Cost</h3>
+                    <p className="text-3xl text-orange-600 dark:text-orange-400">{formatINR(cost)}</p>
+                  </div>
+                </div>
+                <div className="text-sm text-orange-800 dark:text-orange-200 space-y-1">
+                  <p>Recipients: {recipientCount}</p>
+                  <p className="text-xs opacity-80 pt-1">Push notifications are free via FCM.</p>
+                </div>
               </div>
-            </div>
-            <div className="text-sm text-orange-800 dark:text-orange-200 space-y-1">
-              <p>Recipients: {sendMode === 'single' ? 1 : recipients.length}</p>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Send Buttons — two parallel actions */}
           <div className="grid grid-cols-2 gap-2">

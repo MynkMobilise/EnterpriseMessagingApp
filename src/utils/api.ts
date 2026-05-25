@@ -4,6 +4,9 @@ import { toast } from 'sonner';
 // API Configuration
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://suchna.onmobilise.com/api/v1';
 
+// Host root for static media (uploads served at /uploads/...). Strips the /api/v1 suffix.
+export const MEDIA_HOST = API_BASE_URL.replace(/\/api\/v\d+\/?$/, '');
+
 // Create axios instance
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -245,6 +248,40 @@ export const apiService = {
         responseType: 'blob',
       });
       return response.data;
+    },
+
+    /**
+     * HRMS — external HR-system sync. Same field schema as the Excel
+     * template, kept in sync on the backend at hrmsSyncService.HRMS_FIELDS.
+     */
+    hrms: {
+      getConfig: async () => {
+        const r = await api.get('/contacts/hrms/config');
+        return r.data;
+      },
+      saveConfig: async (data: {
+        hrmsApiUrl?: string;
+        hrmsApiAuthHeaderName?: string;
+        hrmsApiAuthHeaderValue?: string;
+        clearAuth?: boolean;
+      }) => {
+        const r = await api.put('/contacts/hrms/config', data);
+        return r.data;
+      },
+      syncNow: async () => {
+        // HRMS sync walks paginated employee data; can run several minutes
+        // on large orgs. Override the axios default 30s timeout for just
+        // this call so the browser doesn't bail out while the server is
+        // still working through pages.
+        const r = await api.post('/contacts/hrms/sync', undefined, {
+          timeout: 500000,
+        });
+        return r.data;
+      },
+      downloadTemplate: async () => {
+        const r = await api.get('/contacts/hrms/template.csv', { responseType: 'blob' });
+        return r.data;
+      },
     },
   },
 
@@ -621,6 +658,14 @@ export const apiService = {
       const response = await api.get('/roles/stats');
       return response.data;
     },
+    updatePermissions: async (name: string, permissions: Record<string, boolean>) => {
+      const r = await api.put(`/roles/${name}/permissions`, { permissions });
+      return r.data;
+    },
+    resetPermissions: async (name: string) => {
+      const r = await api.delete(`/roles/${name}/permissions`);
+      return r.data;
+    },
   },
   media: {
     list: async (params?: { page?: number; limit?: number; type?: string; search?: string }) => {
@@ -688,6 +733,23 @@ export const apiService = {
       const response = await api.delete(`/contact-groups/${id}`);
       return response.data;
     },
+    // Whitelist of fields a dynamic group may filter on. Frontend uses this
+    // to build its picker without hard-coding the field names.
+    filterFields: async () => {
+      const r = await api.get('/contact-groups/filter-fields');
+      return r.data;
+    },
+    // Distinct values that exist for one filter field in the caller's org.
+    // E.g. all departments the org has seen → dropdown options.
+    distinctValues: async (field: string) => {
+      const r = await api.get(`/contact-groups/distinct/${encodeURIComponent(field)}`);
+      return r.data;
+    },
+    // Evaluate a dynamic criteria without saving — returns count + sample.
+    preview: async (filterConditions: any, sampleLimit = 10) => {
+      const r = await api.post('/contact-groups/preview', { filterConditions, sampleLimit });
+      return r.data;
+    },
     addContacts: async (id: string, contactIds: string[]) => {
       const response = await api.post(`/contact-groups/${id}/contacts`, { contactIds });
       return response.data;
@@ -695,6 +757,36 @@ export const apiService = {
     removeContacts: async (id: string, contactIds: string[]) => {
       const response = await api.delete(`/contact-groups/${id}/contacts`, { data: { contactIds } });
       return response.data;
+    },
+    // User assignments — controls which operators can see this group.
+    listAssignedUsers: async (id: string) => {
+      const r = await api.get(`/contact-groups/${id}/assigned-users`);
+      return r.data;
+    },
+    setAssignedUsers: async (id: string, userIds: number[]) => {
+      const r = await api.put(`/contact-groups/${id}/assigned-users`, { userIds });
+      return r.data;
+    },
+    // Bulk-apply assignments across many groups × many users.
+    // mode: 'add' inserts pairs; 'remove' deletes pairs; 'replace' sets each
+    // group's assignees to exactly userIds.
+    bulkAssign: async (
+      groupIds: number[],
+      userIds: number[],
+      mode: 'add' | 'remove' | 'replace' = 'add'
+    ) => {
+      const r = await api.post('/contact-groups/assignments/bulk', { groupIds, userIds, mode });
+      return r.data;
+    },
+    // Groups one operator is currently assigned to (for "Update Assigned" pre-check).
+    listUserAssignedGroups: async (userId: number) => {
+      const r = await api.get(`/contact-groups/assigned-to/${userId}`);
+      return r.data;
+    },
+    // Replace an operator's entire assigned-group set.
+    setUserAssignedGroups: async (userId: number, groupIds: number[]) => {
+      const r = await api.put(`/contact-groups/assigned-to/${userId}`, { groupIds });
+      return r.data;
     },
   },
 
@@ -734,6 +826,27 @@ export const apiService = {
   webhooks: {
     recent: async (params?: { limit?: number }) => {
       const r = await api.get('/webhooks/recent', { params });
+      return r.data;
+    },
+  },
+
+  dashboard: {
+    // Leadership dashboard — accepts all filters as query params.
+    leadership: async (params?: {
+      startDate?: string;
+      endDate?: string;
+      channel?: string;
+      userId?: number;
+      department?: string;
+      region?: string;
+      costCenter?: string;
+      designation?: string;
+    }) => {
+      const r = await api.get('/dashboard/leadership', { params });
+      return r.data;
+    },
+    leadershipFilters: async () => {
+      const r = await api.get('/dashboard/leadership/filters');
       return r.data;
     },
   },

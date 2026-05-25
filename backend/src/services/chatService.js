@@ -11,7 +11,7 @@
  * fired from the webhook). This service is read-side only, plus the reply-write.
  */
 const { Op, QueryTypes } = require('sequelize');
-const { Message, Contact, Template, OrganizationSettings, sequelize } = require('../models');
+const { Message, Contact, Template, OrganizationSettings, WebhookEvent, sequelize } = require('../models');
 const { AppError, NotFoundError } = require('../utils/errorTypes');
 const { normalizePhone } = require('../utils/phoneNumber');
 
@@ -337,8 +337,12 @@ async function getReplyWindowStatus(organizationId, phone) {
  * Meta can't complete the subscription handshake, so no inbound webhooks
  * ever fire.
  */
-async function getWebhookStatus(organizationId) {
+async function getWebhookStatus(organizationId, { publicBaseUrl } = {}) {
   const settings = await OrganizationSettings.findOne({ where: { organizationId } });
+  const expectedCallbackUrl = publicBaseUrl
+    ? `${publicBaseUrl.replace(/\/$/, '')}/api/v1/webhooks/whatsapp`
+    : null;
+
   if (!settings) {
     return {
       ready: false,
@@ -348,8 +352,15 @@ async function getWebhookStatus(organizationId) {
         whatsappPhoneNumberId: false,
         whatsappAccessToken: false,
         whatsappWebhookVerifyToken: false,
+        directionColumn: true,
       },
       inboundMessageCount: 0,
+      recentWebhookHits: 0,
+      recentInboundHits: 0,
+      recentErrorHits: 0,
+      lastWebhookAt: null,
+      lastWebhookError: null,
+      expectedCallbackUrl,
     };
   }
 
@@ -358,12 +369,23 @@ async function getWebhookStatus(organizationId) {
     whatsappPhoneNumberId: !!settings.whatsappPhoneNumberId,
     whatsappAccessToken: !!settings.whatsappAccessToken,
     whatsappWebhookVerifyToken: !!settings.whatsappWebhookVerifyToken,
+    // Schema check — on a fresh server, the migrate-add-message-direction
+    // script may not have run yet. Without the direction column the inbound
+    // handler will fail to insert. Probe INFORMATION_SCHEMA for clarity.
+    directionColumn: await hasDirectionColumn(),
   };
-  const ready = Object.values(checks).every(Boolean);
+  const baseReady =
+    checks.whatsappBusinessAccountId &&
+    checks.whatsappPhoneNumberId &&
+    checks.whatsappAccessToken &&
+    checks.whatsappWebhookVerifyToken;
+  const ready = baseReady && checks.directionColumn;
 
   let reason = null;
   if (!ready) {
-    if (!checks.whatsappWebhookVerifyToken) {
+    if (!checks.directionColumn) {
+      reason = 'Database migration not applied: messages.direction column missing. SSH to the server and run `node backend/scripts/migrate-all.js`.';
+    } else if (!checks.whatsappWebhookVerifyToken) {
       reason = 'Webhook Verify Token is not set in Settings → WhatsApp → Manual Configuration. Without it Meta cannot subscribe inbound messages.';
     } else if (!checks.whatsappAccessToken) {
       reason = 'WhatsApp access token is missing.';
@@ -374,20 +396,101 @@ async function getWebhookStatus(organizationId) {
     }
   }
 
-  // Inbound count — shows whether Meta has ever actually delivered anything.
-  // If zero despite a fully-configured org, the webhook URL likely isn't
-  // reachable from Meta (localhost without a tunnel, wrong subscription, etc.).
+  // Inbound message count — has Meta ever delivered anything?
   const inboundMessageCount = await Message.count({
     where: { organizationId, channel: 'whatsapp', direction: 'inbound' },
   });
+
+  // Webhook-event activity in the last 24h. Distinguishes:
+  //   - 0 recent hits → Meta isn't calling our URL (URL wrong / not subscribed
+  //     / not publicly reachable)
+  //   - hits exist but only 'status' direction → Meta calls but we never get
+  //     inbound (WABA not subscribed to 'messages' field)
+  //   - recent inbound hits but inboundMessageCount stayed flat → handler
+  //     errored (see lastWebhookError)
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  let recentWebhookHits = 0;
+  let recentInboundHits = 0;
+  let recentErrorHits = 0;
+  let lastWebhookAt = null;
+  let lastWebhookError = null;
+  if (WebhookEvent) {
+    try {
+      recentWebhookHits = await WebhookEvent.count({
+        where: { organizationId, createdAt: { [Op.gte]: since } },
+      });
+      recentInboundHits = await WebhookEvent.count({
+        where: { organizationId, direction: 'inbound', createdAt: { [Op.gte]: since } },
+      });
+      recentErrorHits = await WebhookEvent.count({
+        where: { organizationId, status: 'error', createdAt: { [Op.gte]: since } },
+      });
+      const lastRow = await WebhookEvent.findOne({
+        where: { organizationId },
+        order: [['createdAt', 'DESC']],
+        attributes: ['createdAt', 'errorMessage', 'status', 'direction'],
+      });
+      if (lastRow) {
+        lastWebhookAt = lastRow.createdAt;
+        if (lastRow.status === 'error') lastWebhookError = lastRow.errorMessage || null;
+      }
+    } catch (_) {
+      // webhook_events table may not exist on very old deployments
+    }
+  }
+
+  // Refine the reason based on hit data — config might be fine but Meta still
+  // can't reach the URL, or the WABA isn't subscribed to messages.
+  if (!reason && baseReady) {
+    if (recentWebhookHits === 0) {
+      reason = `Config looks good but Meta has not called the webhook in the last 24h. Verify the Callback URL in Meta App Dashboard → WhatsApp → Configuration → Webhooks matches: ${expectedCallbackUrl || '<your public URL>/api/v1/webhooks/whatsapp'}`;
+    } else if (recentInboundHits === 0) {
+      reason = 'Meta is calling the webhook (status updates) but never delivers inbound messages. Open Meta App Dashboard → WhatsApp → Configuration → Webhooks and subscribe to the "messages" field.';
+    } else if (recentErrorHits > 0) {
+      reason = `Webhook is firing but the handler is erroring. Last error: ${lastWebhookError || 'see Webhook Events page'}.`;
+    }
+  }
 
   return {
     ready,
     reason,
     checks,
     inboundMessageCount,
+    recentWebhookHits,
+    recentInboundHits,
+    recentErrorHits,
+    lastWebhookAt,
+    lastWebhookError,
     phoneNumberId: settings.whatsappPhoneNumberId || null,
+    expectedCallbackUrl,
   };
+}
+
+/**
+ * Probe MySQL information_schema to confirm messages.direction exists.
+ * Cached for 60s per process to avoid hammering the schema metadata on
+ * every webhook-status request.
+ */
+let _directionCheck = { at: 0, value: null };
+async function hasDirectionColumn() {
+  const now = Date.now();
+  if (_directionCheck.value !== null && now - _directionCheck.at < 60_000) {
+    return _directionCheck.value;
+  }
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'messages'
+        AND COLUMN_NAME = 'direction'
+      LIMIT 1
+    `);
+    const ok = Array.isArray(rows) && rows.length > 0;
+    _directionCheck = { at: now, value: ok };
+    return ok;
+  } catch (_) {
+    return true; // fail-open: don't block on a schema probe failure
+  }
 }
 
 module.exports = {

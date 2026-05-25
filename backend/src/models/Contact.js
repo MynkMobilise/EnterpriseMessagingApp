@@ -124,6 +124,28 @@ const Contact = sequelize.define('contacts', {
   metadata: {
     type: DataTypes.JSON,
   },
+  // ---- HRMS-imported fields (from external HR API or HRMS Excel upload) ----
+  externalId: { type: DataTypes.STRING(64), field: 'external_id' },
+  employeeId: { type: DataTypes.STRING(64), field: 'employee_id' },
+  employeeStatus: { type: DataTypes.STRING(32), field: 'employee_status' },
+  employmentCategory: { type: DataTypes.STRING(64), field: 'employment_category' },
+  skillType: { type: DataTypes.STRING(64), field: 'skill_type' },
+  hiringType: { type: DataTypes.STRING(64), field: 'hiring_type' },
+  costCenterCode: { type: DataTypes.STRING(64), field: 'cost_center_code' },
+  costCenterName: { type: DataTypes.STRING(255), field: 'cost_center_name' },
+  reportingManagerCode: { type: DataTypes.STRING(64), field: 'reporting_manager_code' },
+  reportingManagerName: { type: DataTypes.STRING(255), field: 'reporting_manager_name' },
+  reportingManagerMobile: { type: DataTypes.STRING(32), field: 'reporting_manager_mobile' },
+  designation: { type: DataTypes.STRING(255) },
+  subDepartment: { type: DataTypes.STRING(255), field: 'sub_department' },
+  region: { type: DataTypes.STRING(128) },
+  segmentName: { type: DataTypes.STRING(128), field: 'segment_name' },
+  subSegmentName: { type: DataTypes.STRING(128), field: 'sub_segment_name' },
+  lastSyncedAt: { type: DataTypes.DATE, field: 'last_synced_at' },
+  lastSyncSource: {
+    type: DataTypes.ENUM('excel', 'api', 'manual'),
+    field: 'last_sync_source',
+  },
   createdAt: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,

@@ -1,4 +1,4 @@
-const { User, Organization } = require('../models');
+const { User, Organization, OrganizationRolePermissions } = require('../models');
 const { AppError, AuthenticationError, AuthorizationError } = require('../utils/errorTypes');
 const { verifyAccessToken } = require('../config/jwt');
 const authService = require('../services/authService');
@@ -38,12 +38,35 @@ const authenticate = async (req, res, next) => {
       throw new AppError('User account is not active', 403);
     }
 
-    // Merge user-stored permissions with the role's defaults so newly added
-    // permission keys (e.g. `canViewLiveChat`) automatically apply to users
-    // whose stored permissions JSON predates the change. Per-user overrides
-    // (set by an admin) still win because user.permissions spreads last.
+    // Three-layer permission merge (most general → most specific):
+    //   1. code defaults for the role (authService.getDefaultPermissions)
+    //   2. per-org overrides for the role (organization_role_permissions)
+    //   3. per-user overrides (user.permissions)
+    // Each later layer wins, so admins can re-shape what an "operator" can
+    // do in their org without touching code, and individual users can be
+    // tuned beyond that. Failure to look up the org-override row is non-fatal
+    // (treat as "no override") so a missing table on a fresh deploy doesn't
+    // break login.
     const roleDefaults = authService.getDefaultPermissions(user.role);
-    const permissions = { ...roleDefaults, ...(user.permissions || {}) };
+    let orgRoleOverrides = {};
+    try {
+      if (OrganizationRolePermissions) {
+        const row = await OrganizationRolePermissions.findOne({
+          where: { organizationId: user.organizationId, role: user.role },
+          attributes: ['permissions'],
+        });
+        if (row && row.permissions && typeof row.permissions === 'object') {
+          orgRoleOverrides = row.permissions;
+        }
+      }
+    } catch (_) {
+      // Table may not exist yet (migration not run) — fall through.
+    }
+    const permissions = {
+      ...roleDefaults,
+      ...orgRoleOverrides,
+      ...(user.permissions || {}),
+    };
 
     // Store original user organization ID for reference
     const userOrganizationId = user.organizationId;

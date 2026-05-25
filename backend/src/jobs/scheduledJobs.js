@@ -3,6 +3,7 @@ const { Message, Session, MessageEvent, ApiKeyUsageLog } = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../utils/logger');
 const templateSyncService = require('../services/templateSyncService');
+const hrmsSyncService = require('../services/hrmsSyncService');
 
 /**
  * Cleanup expired sessions
@@ -113,7 +114,20 @@ const initializeScheduledJobs = () => {
   // Sync WhatsApp templates from Meta - every 15 minutes
   cron.schedule('*/15 * * * *', syncWhatsAppTemplates);
 
+  // Sync HRMS employees → contacts - every 5 minutes (per-org incremental
+  // pull from each org's configured HRMS API URL).
+  cron.schedule('*/5 * * * *', syncHrmsContacts);
+
   logger.info('Scheduled jobs initialized');
+};
+
+const syncHrmsContacts = async () => {
+  try {
+    const r = await hrmsSyncService.syncForAllConfiguredOrgs();
+    logger.info('HRMS nightly sync complete', r);
+  } catch (e) {
+    logger.error('HRMS nightly sync failed:', e.message);
+  }
 };
 
 module.exports = {

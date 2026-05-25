@@ -26,6 +26,9 @@ import {
   AlertCircle,
   CheckCircle,
   Users,
+  Database,
+  RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { sanitizeInput, validateEmail, validatePhone } from '../../utils/security';
@@ -52,6 +55,12 @@ interface Contact {
   jobTitle: string;
   notes: string;
   createdAt: string;
+  // HRMS-synced fields (populated when contact came from HRMS API/Excel).
+  employeeId?: string;
+  designation?: string;
+  department?: string;
+  costCenterName?: string;
+  region?: string;
 }
 
 export function Contacts() {
@@ -75,6 +84,24 @@ export function Contacts() {
   const [importOptions, setImportOptions] = useState({ skipDuplicates: true, updateExisting: false });
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // HRMS sync state — modal + saved-config snapshot + form draft.
+  const [showHrmsModal, setShowHrmsModal] = useState(false);
+  const [hrmsConfig, setHrmsConfig] = useState<{
+    hrmsApiUrl: string;
+    hrmsApiAuthHeaderName: string;
+    hrmsApiAuthHeaderValueSet: boolean;
+    hrmsLastSyncDatetime: string | null;
+    hrmsLastSyncedCount: number;
+    hrmsLastSyncedAt: string | null;
+    hrmsLastSyncError: string | null;
+  } | null>(null);
+  const [hrmsForm, setHrmsForm] = useState({
+    hrmsApiUrl: '',
+    hrmsApiAuthHeaderName: '',
+    hrmsApiAuthHeaderValue: '',
+  });
+  const [hrmsSaving, setHrmsSaving] = useState(false);
+  const [hrmsSyncing, setHrmsSyncing] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -111,7 +138,9 @@ export function Contacts() {
             name: contact.name || 'Unknown',
             phone: contact.phoneNumber || '',
             email: contact.email || '',
-            organization: contact.company || '',
+            // For HRMS-synced contacts, fall back to cost-center name for the
+            // "Organization" column so the table isn't a sea of blanks.
+            organization: contact.company || contact.costCenterName || '',
             tags: contact.tags || [],
             productsInterest: contact.customFields?.productsInterest || [],
             source: contact.source || 'Manual',
@@ -121,11 +150,17 @@ export function Contacts() {
             smsOptIn: contact.optInStatus === 'opted_in' || false,
             country: contact.country || '',
             city: contact.city || '',
-            jobTitle: contact.jobTitle || '',
+            jobTitle: contact.jobTitle || contact.designation || '',
             notes: contact.notes || '',
             lastContact: contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleDateString() : 'Never',
             totalMessages: (contact.totalMessagesSent || 0) + (contact.totalMessagesReceived || 0),
             createdAt: contact.createdAt || new Date().toISOString(),
+            // HRMS-specific (raw, for display in the row sub-line).
+            employeeId: contact.employeeId || '',
+            designation: contact.designation || '',
+            department: contact.department || '',
+            costCenterName: contact.costCenterName || '',
+            region: contact.region || '',
           })));
           
           // Extract pagination metadata
@@ -223,7 +258,9 @@ export function Contacts() {
             name: contact.name || 'Unknown',
             phone: contact.phoneNumber || '',
             email: contact.email || '',
-            organization: contact.company || '',
+            // For HRMS-synced contacts, fall back to cost-center name for the
+            // "Organization" column so the table isn't a sea of blanks.
+            organization: contact.company || contact.costCenterName || '',
             tags: contact.tags || [],
             productsInterest: contact.customFields?.productsInterest || [],
             source: contact.source || 'Manual',
@@ -233,11 +270,17 @@ export function Contacts() {
             smsOptIn: contact.optInStatus === 'opted_in' || false,
             country: contact.country || '',
             city: contact.city || '',
-            jobTitle: contact.jobTitle || '',
+            jobTitle: contact.jobTitle || contact.designation || '',
             notes: contact.notes || '',
             lastContact: contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleDateString() : 'Never',
             totalMessages: (contact.totalMessagesSent || 0) + (contact.totalMessagesReceived || 0),
             createdAt: contact.createdAt || new Date().toISOString(),
+            // HRMS-specific (raw, for display in the row sub-line).
+            employeeId: contact.employeeId || '',
+            designation: contact.designation || '',
+            department: contact.department || '',
+            costCenterName: contact.costCenterName || '',
+            region: contact.region || '',
           })));
         }
       }
@@ -286,7 +329,9 @@ export function Contacts() {
             name: contact.name || 'Unknown',
             phone: contact.phoneNumber || '',
             email: contact.email || '',
-            organization: contact.company || '',
+            // For HRMS-synced contacts, fall back to cost-center name for the
+            // "Organization" column so the table isn't a sea of blanks.
+            organization: contact.company || contact.costCenterName || '',
             tags: contact.tags || [],
             productsInterest: contact.customFields?.productsInterest || [],
             source: contact.source || 'Manual',
@@ -296,11 +341,17 @@ export function Contacts() {
             smsOptIn: contact.optInStatus === 'opted_in' || false,
             country: contact.country || '',
             city: contact.city || '',
-            jobTitle: contact.jobTitle || '',
+            jobTitle: contact.jobTitle || contact.designation || '',
             notes: contact.notes || '',
             lastContact: contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleDateString() : 'Never',
             totalMessages: (contact.totalMessagesSent || 0) + (contact.totalMessagesReceived || 0),
             createdAt: contact.createdAt || new Date().toISOString(),
+            // HRMS-specific (raw, for display in the row sub-line).
+            employeeId: contact.employeeId || '',
+            designation: contact.designation || '',
+            department: contact.department || '',
+            costCenterName: contact.costCenterName || '',
+            region: contact.region || '',
           })));
         }
       }
@@ -366,7 +417,9 @@ export function Contacts() {
             name: contact.name || 'Unknown',
             phone: contact.phoneNumber || '',
             email: contact.email || '',
-            organization: contact.company || '',
+            // For HRMS-synced contacts, fall back to cost-center name for the
+            // "Organization" column so the table isn't a sea of blanks.
+            organization: contact.company || contact.costCenterName || '',
             tags: contact.tags || [],
             productsInterest: contact.customFields?.productsInterest || [],
             source: contact.source || 'Manual',
@@ -376,11 +429,17 @@ export function Contacts() {
             smsOptIn: contact.optInStatus === 'opted_in' || false,
             country: contact.country || '',
             city: contact.city || '',
-            jobTitle: contact.jobTitle || '',
+            jobTitle: contact.jobTitle || contact.designation || '',
             notes: contact.notes || '',
             lastContact: contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleDateString() : 'Never',
             totalMessages: (contact.totalMessagesSent || 0) + (contact.totalMessagesReceived || 0),
             createdAt: contact.createdAt || new Date().toISOString(),
+            // HRMS-specific (raw, for display in the row sub-line).
+            employeeId: contact.employeeId || '',
+            designation: contact.designation || '',
+            department: contact.department || '',
+            costCenterName: contact.costCenterName || '',
+            region: contact.region || '',
           })));
         }
       }
@@ -398,6 +457,94 @@ export function Contacts() {
     }
     toast.success(`${selectedContacts.length} contacts deleted`);
     setSelectedContacts([]);
+  };
+
+  const openHrmsModal = async () => {
+    setShowHrmsModal(true);
+    try {
+      const r = await apiService.contacts.hrms.getConfig();
+      if (r?.success) {
+        setHrmsConfig(r.data);
+        setHrmsForm({
+          hrmsApiUrl: r.data.hrmsApiUrl || '',
+          hrmsApiAuthHeaderName: r.data.hrmsApiAuthHeaderName || '',
+          hrmsApiAuthHeaderValue: '', // never echoed back
+        });
+      }
+    } catch (e: any) {
+      toast.error('Failed to load HRMS config', {
+        description: e?.response?.data?.error?.message || e?.message,
+      });
+    }
+  };
+
+  const handleHrmsSaveConfig = async () => {
+    if (!hrmsForm.hrmsApiUrl.trim()) {
+      toast.error('API URL is required');
+      return;
+    }
+    setHrmsSaving(true);
+    try {
+      const r = await apiService.contacts.hrms.saveConfig({
+        hrmsApiUrl: hrmsForm.hrmsApiUrl.trim(),
+        hrmsApiAuthHeaderName: hrmsForm.hrmsApiAuthHeaderName.trim() || undefined,
+        hrmsApiAuthHeaderValue: hrmsForm.hrmsApiAuthHeaderValue.trim() || undefined,
+      });
+      if (r?.success) {
+        toast.success('HRMS configuration saved');
+        // Reload config to reflect the now-set state
+        const fresh = await apiService.contacts.hrms.getConfig();
+        if (fresh?.success) setHrmsConfig(fresh.data);
+        setHrmsForm((f) => ({ ...f, hrmsApiAuthHeaderValue: '' })); // wipe sensitive field
+      }
+    } catch (e: any) {
+      toast.error('Failed to save HRMS config', {
+        description: e?.response?.data?.error?.message || e?.message,
+      });
+    } finally {
+      setHrmsSaving(false);
+    }
+  };
+
+  const handleHrmsSyncNow = async () => {
+    setHrmsSyncing(true);
+    try {
+      const r = await apiService.contacts.hrms.syncNow();
+      if (r?.success) {
+        toast.success('HRMS sync complete', {
+          description: r.message,
+        });
+        // Reload config to show updated last_synced_at + count
+        const fresh = await apiService.contacts.hrms.getConfig();
+        if (fresh?.success) setHrmsConfig(fresh.data);
+        // Refresh contacts list to show newly-synced rows
+        fetchContacts();
+      } else {
+        toast.error('Sync failed', {
+          description: r?.error?.message,
+        });
+      }
+    } catch (e: any) {
+      toast.error('Sync failed', {
+        description: e?.response?.data?.error?.message || e?.message,
+      });
+    } finally {
+      setHrmsSyncing(false);
+    }
+  };
+
+  const handleHrmsDownloadTemplate = async () => {
+    try {
+      const blob = await apiService.contacts.hrms.downloadTemplate();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'hrms-contacts-template.csv';
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast.error('Failed to download template');
+    }
   };
 
   const handleExport = async () => {
@@ -577,7 +724,7 @@ export function Contacts() {
   ];
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="colorful p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -587,6 +734,14 @@ export function Contacts() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={openHrmsModal}
+            className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2"
+            title="Sync contacts from an external HRMS API"
+          >
+            <Database className="w-4 h-4" />
+            HRMS Sync
+          </button>
           <button
             onClick={handleImport}
             className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2"
@@ -803,25 +958,43 @@ export function Contacts() {
                     </td>
                     <td className="px-6 py-4">
                       <div>
-                        <p className="text-sm text-gray-900 dark:text-white">{contact.name}</p>
-                        <div className="flex items-center gap-3 mt-1">
-                          <span className="text-xs text-gray-500 flex items-center gap-1">
-                            <Phone className="w-3 h-3" />
-                            {contact.phone}
-                          </span>
-                          <span className="text-xs text-gray-500 flex items-center gap-1">
-                            <Mail className="w-3 h-3" />
-                            {contact.email}
-                          </span>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm text-gray-900 dark:text-white">{contact.name}</p>
+                          {contact.employeeId && (
+                            <span className="text-[10px] uppercase tracking-wider text-gray-400 px-1.5 py-0.5 border border-gray-200 dark:border-gray-700 rounded">
+                              {contact.employeeId}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 flex-wrap">
+                          {contact.phone && (
+                            <span className="text-xs text-gray-500 flex items-center gap-1">
+                              <Phone className="w-3 h-3" />
+                              {contact.phone}
+                            </span>
+                          )}
+                          {contact.email && (
+                            <span className="text-xs text-gray-500 flex items-center gap-1">
+                              <Mail className="w-3 h-3" />
+                              {contact.email}
+                            </span>
+                          )}
+                          {!contact.phone && !contact.email && (
+                            <span className="text-xs text-gray-400 italic">No contact info</span>
+                          )}
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       <div>
                         <p className="text-sm text-gray-900 dark:text-white">
-                          {contact.organization}
+                          {contact.organization || <span className="text-gray-400">—</span>}
                         </p>
-                        <p className="text-xs text-gray-500 mt-1">{contact.jobTitle}</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {[contact.jobTitle, contact.department, contact.region]
+                            .filter(Boolean)
+                            .join(' · ') || ''}
+                        </p>
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -1295,6 +1468,174 @@ export function Contacts() {
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----- HRMS modal: configure URL + auth + run sync + template ----- */}
+      {showHrmsModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setShowHrmsModal(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Database className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+                <h3 className="text-lg text-gray-900 dark:text-white">HRMS Integration</h3>
+              </div>
+              <button
+                onClick={() => setShowHrmsModal(false)}
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+              >
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-5 overflow-y-auto">
+              {/* Status panel */}
+              {hrmsConfig && (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-3 text-xs space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Status</span>
+                    <span className="text-gray-900 dark:text-white">
+                      {hrmsConfig.hrmsApiUrl ? 'Configured' : 'Not configured'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Last synced</span>
+                    <span className="text-gray-900 dark:text-white">
+                      {hrmsConfig.hrmsLastSyncedAt
+                        ? new Date(hrmsConfig.hrmsLastSyncedAt).toLocaleString()
+                        : 'Never'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Records in last sync</span>
+                    <span className="text-gray-900 dark:text-white">
+                      {hrmsConfig.hrmsLastSyncedCount || 0}
+                    </span>
+                  </div>
+                  {hrmsConfig.hrmsLastSyncError && (
+                    <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-800 text-red-600 dark:text-red-400">
+                      <span className="font-medium">Last error:</span>{' '}
+                      {hrmsConfig.hrmsLastSyncError}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* API config */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                  API Endpoint
+                </h4>
+                <div>
+                  <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    HRMS API URL <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={hrmsForm.hrmsApiUrl}
+                    onChange={(e) =>
+                      setHrmsForm({ ...hrmsForm, hrmsApiUrl: e.target.value })
+                    }
+                    placeholder="https://hrms.example.com/api/export_user_data"
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                  />
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Endpoint receives <code>?limit=&amp;after_id=&amp;last_sync_datetime=</code>{' '}
+                    and returns <code>{`{ success, data, next_empid, last_sync_datetime }`}</code>.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      Auth header name <span className="text-gray-400">(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={hrmsForm.hrmsApiAuthHeaderName}
+                      onChange={(e) =>
+                        setHrmsForm({ ...hrmsForm, hrmsApiAuthHeaderName: e.target.value })
+                      }
+                      placeholder="X-API-Key"
+                      className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      Auth header value{' '}
+                      {hrmsConfig?.hrmsApiAuthHeaderValueSet && (
+                        <span className="text-gray-400">(set — leave blank to keep)</span>
+                      )}
+                    </label>
+                    <input
+                      type="password"
+                      value={hrmsForm.hrmsApiAuthHeaderValue}
+                      onChange={(e) =>
+                        setHrmsForm({ ...hrmsForm, hrmsApiAuthHeaderValue: e.target.value })
+                      }
+                      placeholder={hrmsConfig?.hrmsApiAuthHeaderValueSet ? '••••••••' : 'secret value'}
+                      className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={handleHrmsSaveConfig}
+                  disabled={hrmsSaving}
+                  className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-lg flex items-center gap-2"
+                >
+                  {hrmsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Save Configuration
+                </button>
+              </div>
+
+              {/* Sync controls */}
+              <div className="pt-4 border-t border-gray-200 dark:border-gray-800 space-y-3">
+                <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                  Sync &amp; Templates
+                </h4>
+                <p className="text-xs text-gray-500">
+                  Manual sync pulls all new/updated employees from the URL above and upserts
+                  them into Contacts. The cron runs the same job every 5 minutes automatically.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={handleHrmsSyncNow}
+                    disabled={hrmsSyncing || !hrmsConfig?.hrmsApiUrl}
+                    className="px-4 py-2 text-sm bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    title={!hrmsConfig?.hrmsApiUrl ? 'Save an API URL first' : ''}
+                  >
+                    {hrmsSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    Sync Now
+                  </button>
+                  <button
+                    onClick={handleHrmsDownloadTemplate}
+                    className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download Excel Template
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-500">
+                  The Excel template uses the same column names as the API JSON keys, so a
+                  payload can be dumped to Excel and re-imported losslessly via Import.
+                </p>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-800 flex justify-end">
+              <button
+                onClick={() => setShowHrmsModal(false)}
+                className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

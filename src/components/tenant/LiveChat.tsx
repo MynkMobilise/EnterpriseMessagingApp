@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Search, Send as SendIcon, Loader2, MessageCircle, FileText, X, Check, CheckCheck, RefreshCw, Plus, AlertTriangle } from 'lucide-react';
-import { apiService } from '../../utils/api';
+import { apiService, MEDIA_HOST } from '../../utils/api';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -74,8 +74,13 @@ interface ApprovedTemplate {
   variables: string[] | null;
 }
 
-const MEDIA_BASE =
-  (import.meta as any).env?.VITE_API_BASE_URL || 'https://suchna.onmobilise.com';
+// Resolve a media reference for display. Absolute URLs pass through, relative
+// `/uploads/...` paths get prefixed with the API host (without the /api/v1 suffix).
+const resolveMedia = (url: string | null | undefined): string => {
+  if (!url) return '';
+  if (/^https?:/i.test(url)) return url;
+  return `${MEDIA_HOST}${url}`;
+};
 
 export function LiveChat() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -90,6 +95,13 @@ export function LiveChat() {
     ready: boolean;
     reason: string | null;
     inboundMessageCount: number;
+    recentWebhookHits?: number;
+    recentInboundHits?: number;
+    recentErrorHits?: number;
+    lastWebhookAt?: string | null;
+    lastWebhookError?: string | null;
+    expectedCallbackUrl?: string | null;
+    checks?: Record<string, boolean>;
   } | null>(null);
 
   const activePhoneRef = useRef<string | null>(null);
@@ -300,7 +312,18 @@ function ConversationList({
   onSelect: (phone: string) => void;
   onRefresh: () => void;
   onNewChat: () => void;
-  webhookStatus: { ready: boolean; reason: string | null; inboundMessageCount: number } | null;
+  webhookStatus: {
+    ready: boolean;
+    reason: string | null;
+    inboundMessageCount: number;
+    recentWebhookHits?: number;
+    recentInboundHits?: number;
+    recentErrorHits?: number;
+    lastWebhookAt?: string | null;
+    lastWebhookError?: string | null;
+    expectedCallbackUrl?: string | null;
+    checks?: Record<string, boolean>;
+  } | null;
 }) {
   const navigate = useNavigate();
   // Surface a yellow banner when inbound messages can't arrive yet. Shown
@@ -358,14 +381,40 @@ function ConversationList({
               <p className="font-medium">Inbound messages not arriving</p>
               <p>
                 {webhookStatus?.reason ||
-                  'Your config looks complete but Meta hasn\'t delivered any inbound messages yet. The webhook URL must be publicly reachable AND your WABA must be subscribed to the messages field in Meta App Dashboard.'}
+                  'Your config looks complete but Meta hasn\'t delivered any inbound messages yet.'}
               </p>
-              <button
-                onClick={() => navigate('/settings')}
-                className="text-xs underline text-yellow-900 dark:text-yellow-100 font-medium"
-              >
-                Go to WhatsApp Settings →
-              </button>
+              {webhookStatus?.expectedCallbackUrl && (
+                <p className="break-all">
+                  <span className="opacity-70">Callback URL: </span>
+                  <code className="px-1 py-0.5 bg-yellow-100 dark:bg-yellow-900/40 rounded">
+                    {webhookStatus.expectedCallbackUrl}
+                  </code>
+                </p>
+              )}
+              <p className="opacity-80">
+                Last 24h: {webhookStatus?.recentWebhookHits ?? 0} hits ·{' '}
+                {webhookStatus?.recentInboundHits ?? 0} inbound ·{' '}
+                {webhookStatus?.recentErrorHits ?? 0} errors
+              </p>
+              {webhookStatus?.lastWebhookError && (
+                <p className="text-red-700 dark:text-red-300 break-all">
+                  Last error: {webhookStatus.lastWebhookError}
+                </p>
+              )}
+              <div className="flex gap-3 pt-0.5">
+                <button
+                  onClick={() => navigate('/settings')}
+                  className="text-xs underline text-yellow-900 dark:text-yellow-100 font-medium"
+                >
+                  WhatsApp Settings →
+                </button>
+                <button
+                  onClick={() => navigate('/webhooks')}
+                  className="text-xs underline text-yellow-900 dark:text-yellow-100 font-medium"
+                >
+                  Webhook Events →
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -572,24 +621,24 @@ function MessageBubble({ message, showDate }: { message: ChatMessage; showDate: 
           {/* Direct media on the message row (e.g. inbound image/video). */}
           {message.mediaUrl && message.mediaType === 'image' && (
             <img
-              src={`${MEDIA_BASE}${message.mediaUrl}`}
+              src={`${resolveMedia(message.mediaUrl)}`}
               alt=""
               className="rounded-md mb-1 max-w-full max-h-72 object-cover"
             />
           )}
           {message.mediaUrl && message.mediaType === 'video' && (
             <video
-              src={`${MEDIA_BASE}${message.mediaUrl}`}
+              src={`${resolveMedia(message.mediaUrl)}`}
               controls
               className="rounded-md mb-1 max-w-full max-h-72"
             />
           )}
           {message.mediaUrl && message.mediaType === 'audio' && (
-            <audio src={`${MEDIA_BASE}${message.mediaUrl}`} controls className="mb-1" />
+            <audio src={`${resolveMedia(message.mediaUrl)}`} controls className="mb-1" />
           )}
           {message.mediaUrl && message.mediaType === 'document' && (
             <a
-              href={`${MEDIA_BASE}${message.mediaUrl}`}
+              href={`${resolveMedia(message.mediaUrl)}`}
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-2 text-blue-600 underline mb-1 text-sm"
@@ -603,11 +652,7 @@ function MessageBubble({ message, showDate }: { message: ChatMessage; showDate: 
               part of the template definition. */}
           {!message.mediaUrl && tpl?.headerContent && (headerType === 'image') && (
             <img
-              src={
-                tpl.headerContent.startsWith('http')
-                  ? tpl.headerContent
-                  : `${MEDIA_BASE}${tpl.headerContent}`
-              }
+              src={resolveMedia(tpl.headerContent)}
               alt=""
               className="rounded-md mb-1 max-w-full max-h-72 object-cover"
             />
@@ -637,13 +682,13 @@ function MessageBubble({ message, showDate }: { message: ChatMessage; showDate: 
                   {card.media?.url ? (
                     card.media.type === 'video' ? (
                       <video
-                        src={`${MEDIA_BASE}${card.media.url}`}
+                        src={resolveMedia(card.media.url)}
                         className="w-full h-24 object-cover"
                         muted
                       />
                     ) : (
                       <img
-                        src={`${MEDIA_BASE}${card.media.url}`}
+                        src={resolveMedia(card.media.url)}
                         alt=""
                         className="w-full h-24 object-cover"
                       />
@@ -690,11 +735,17 @@ function MessageBubble({ message, showDate }: { message: ChatMessage; showDate: 
 }
 
 function StatusTicks({ status }: { status: ChatMessage['deliveryStatus'] }) {
+  // Monochrome status indicators — differentiate by glyph + weight, not hue.
+  //   queued/processing → faint ellipsis
+  //   failed            → bold '!' (no red)
+  //   sent              → single tick, mid-gray
+  //   delivered         → double tick, mid-gray
+  //   read              → double tick, solid black (or white in dark mode)
   if (status === 'queued' || status === 'processing') {
     return <span className="text-[10px] text-gray-400">…</span>;
   }
   if (status === 'failed') {
-    return <span className="text-[10px] text-red-500">!</span>;
+    return <span className="text-[10px] font-bold text-gray-900 dark:text-white">!</span>;
   }
   if (status === 'sent') {
     return <Check className="w-3 h-3 text-gray-500" />;
@@ -703,7 +754,7 @@ function StatusTicks({ status }: { status: ChatMessage['deliveryStatus'] }) {
     return <CheckCheck className="w-3 h-3 text-gray-500" />;
   }
   if (status === 'read') {
-    return <CheckCheck className="w-3 h-3 text-blue-500" />;
+    return <CheckCheck className="w-3 h-3 text-gray-900 dark:text-white" strokeWidth={2.5} />;
   }
   return null;
 }
