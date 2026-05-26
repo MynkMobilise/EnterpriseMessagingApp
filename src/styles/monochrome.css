@@ -12,8 +12,10 @@
  *      emerald/amber/rose/fuchsia/violet/lime/slate/stone/gray) → zinc.
  *   3. Map "primary action" shades (bg-blue-600, bg-green-600, etc.) to
  *      pure black so primary buttons feel editorial (Stripe/Linear).
- *   4. Force imagery grayscale.
- *   5. Type + radius globals to match the editorial vibe.
+ *   4. Type + radius globals to match the editorial vibe.
+ *
+ * Images, videos, canvases and SVG charts (recharts) are LEFT IN COLOR —
+ * only the surrounding UI chrome is monochrome.
  *
  * Dark mode flips primary to white-on-near-black naturally because the
  * .dark variant of every overridden utility is also remapped below.
@@ -174,21 +176,11 @@ select.px-4.py-3 {
 }
 
 /* ============================================================
- *  IMAGERY + ICONS — force grayscale
+ *  IMAGERY + ICONS
+ *  Images, videos, canvases and charts (recharts is SVG) keep
+ *  their natural colors — only the surrounding chrome is mono.
+ *  Lucide/Heroicons inherit currentColor and are already mono.
  * ============================================================ */
-
-img:not([data-color]),
-video:not([data-color]),
-canvas:not([data-color]) {
-  filter: grayscale(100%);
-}
-
-/* Lucide / Heroicons / inline SVG icons inherit currentColor and are
-   single-color by nature, so they're already monochrome — but force-disable
-   any embedded hue just in case. */
-svg:not([data-color]) {
-  filter: grayscale(100%);
-}
 
 /* Common avatar gradient classes used throughout the app — neutralize. */
 .bg-gradient-to-br,
@@ -914,9 +906,4 @@ button, a, input, select, textarea {
 /* Force real white text inside colored chips/buttons */
 .colorful .text-white { color: #ffffff !important; }
 
-/* Let images, videos, and SVG charts render in full color inside .colorful
- *  scopes (monochrome.css applies grayscale globally above). */
-.colorful img,
-.colorful video,
-.colorful svg { filter: none !important; }
 

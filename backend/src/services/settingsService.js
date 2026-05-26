@@ -310,7 +310,29 @@ class SettingsService {
         // Encrypt sensitive fields if provided and not empty
         // Only encrypt if not already encrypted (avoid double encryption)
         const { isEncrypted } = require('../utils/encryption');
-        
+
+        // PRESERVE-ON-BLANK: drop any sensitive credential field that came in
+        // empty / null / whitespace. The frontend never echoes these back to
+        // the form for security, so when the user saves the WhatsApp settings
+        // page after editing (say) the API version, the token field arrives
+        // as ''. Without this prune, settings.update() below would WIPE the
+        // existing encrypted token, breaking sends until the user re-pastes
+        // it manually. Same pattern is already used for customApiKey above.
+        const SENSITIVE_FIELDS = [
+          'whatsappAccessToken',
+          'whatsappAppSecret',
+          'smsApiKeyEncrypted',
+          'emailApiKeyEncrypted',
+          'fcmServerKeyEncrypted',
+        ];
+        for (const f of SENSITIVE_FIELDS) {
+          if (mainData[f] === undefined) continue;
+          const v = mainData[f];
+          if (v === null || (typeof v === 'string' && v.trim() === '')) {
+            delete mainData[f];
+          }
+        }
+
         if (mainData.whatsappAccessToken && mainData.whatsappAccessToken.trim() !== '') {
           // Only encrypt if not already encrypted
           if (!isEncrypted(mainData.whatsappAccessToken)) {

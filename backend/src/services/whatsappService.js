@@ -227,21 +227,16 @@ class WhatsAppService {
             logger.info('Token does not appear to be in encrypted format, using as plain text');
             accessToken = settings.whatsappAccessToken;
           } else {
-            // Looks encrypted but can't decrypt - encryption key mismatch
-            logger.error('Token appears encrypted but decryption failed. Encryption key mismatch.');
-            
-            // Clear the invalid encrypted token to force user to re-enter
-            try {
-              await settings.update({ whatsappAccessToken: null });
-              logger.info('Cleared invalid encrypted WhatsApp access token. User must re-enter it.');
-            } catch (updateError) {
-              logger.error('Failed to clear invalid token:', updateError.message);
-            }
-            
+            // Looks encrypted but can't decrypt - encryption key mismatch.
+            // We deliberately DO NOT wipe the stored ciphertext: if the env var
+            // is later restored (e.g. PM2 reload picks up the right .env), the
+            // same token will start decrypting again. Wiping it forced an
+            // unnecessary Meta-token regeneration cycle. Operator must either
+            // restore ENCRYPTION_KEY or re-enter the token manually.
+            logger.error('Token appears encrypted but decryption failed. Encryption key mismatch. Token preserved in DB.');
             throw new Error(
-              'WhatsApp access token decryption failed. The encryption key has changed. ' +
-              'Please go to Settings → WhatsApp API → Manual Configuration and re-enter your Access Token. ' +
-              'The invalid token has been cleared for your security.'
+              'WhatsApp access token decryption failed. The encryption key on the server does not match the one used to save this token. ' +
+              'Either restore ENCRYPTION_KEY in the backend .env and restart, OR go to Settings → WhatsApp API → Manual Configuration and re-enter your Access Token.'
             );
           }
         }

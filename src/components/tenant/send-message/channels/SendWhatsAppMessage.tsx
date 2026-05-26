@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { apiService } from '../../../../utils/api';
 import { SendModeSelector } from '../SendModeSelector';
 import { RecipientSelector } from '../shared/RecipientSelector';
-import { MessageComposer } from '../shared/MessageComposer';
+import { MessageComposer, WhatsAppTemplatePreview } from '../shared/MessageComposer';
 import type { Channel, SendMode, MessageType, Recipient, MessageData, Template } from '../types';
 import { estimateCost, formatINR, rateBreakdown } from '../../../../utils/pricing';
 
@@ -207,7 +207,7 @@ export function SendWhatsAppMessage() {
         </div>
 
         {/* Sidebar */}
-        <div className="space-y-6">
+        <div className="space-y-6 lg:sticky lg:top-20 lg:self-start">
           {/* Cost Estimate */}
           <div className="colorful bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-xl border border-green-200 dark:border-green-800 p-6">
             <div className="flex items-start gap-3 mb-4">
@@ -243,6 +243,18 @@ export function SendWhatsAppMessage() {
               Approve &amp; Send
             </button>
           </div>
+
+          {/* Live WhatsApp Preview — sits below the cost + send actions so the
+              primary CTAs stay above the fold. Only shown for template sends;
+              text/media types don't need a chat-bubble preview. */}
+          {messageType === 'template' && selectedTemplateData && (
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
+              <WhatsAppTemplatePreview
+                template={selectedTemplateData}
+                placeholders={placeholders}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
