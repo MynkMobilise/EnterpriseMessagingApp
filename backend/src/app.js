@@ -102,12 +102,11 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Serve uploaded media files with CORS headers
-app.use('/uploads', (req, res, next) => {
-  // Set CORS headers for static files
+// CORS middleware for static media files (shared by both mounts below).
+const uploadsCors = (req, res, next) => {
   const origin = req.headers.origin;
   const isAllowedOrigin = !origin || allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development';
-  
+
   if (isAllowedOrigin) {
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
@@ -118,14 +117,22 @@ app.use('/uploads', (req, res, next) => {
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   }
-  
-  // Handle preflight requests
+
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
-  
+
   next();
-}, express.static(path.join(__dirname, '../uploads')));
+};
+
+const uploadsStatic = express.static(path.join(__dirname, '../uploads'));
+
+// Primary mount: backend-direct or dev (/uploads/...).
+app.use('/uploads', uploadsCors, uploadsStatic);
+
+// Alias under /api/v1/uploads so production nginx setups that only reverse-proxy
+// /api/* still reach the static handler — no nginx config change required.
+app.use('/api/v1/uploads', uploadsCors, uploadsStatic);
 
 // API routes
 app.use('/api/v1', routes);

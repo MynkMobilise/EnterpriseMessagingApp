@@ -4,8 +4,11 @@ import { toast } from 'sonner';
 // API Configuration
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://suchna.onmobilise.com/api/v1';
 
-// Host root for static media (uploads served at /uploads/...). Strips the /api/v1 suffix.
-export const MEDIA_HOST = API_BASE_URL.replace(/\/api\/v\d+\/?$/, '');
+// Host root for static media. We keep the /api/v1 prefix so prod nginx (which
+// only reverse-proxies /api/*) still reaches the backend's static handler —
+// backend mounts uploads at BOTH /uploads and /api/v1/uploads for this reason.
+// Result: <MEDIA_HOST>/uploads/foo.jpg → https://host/api/v1/uploads/foo.jpg.
+export const MEDIA_HOST = API_BASE_URL.replace(/\/+$/, '');
 
 // Create axios instance
 const api: AxiosInstance = axios.create({
