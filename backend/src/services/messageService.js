@@ -25,6 +25,10 @@ class MessageService {
       category,
       skipApproval, // Flag to bypass approval (for test messages)
       emailConfigurationId, // Specific email configuration to use for testing
+      // Optional per-send override for the template's media header. When set,
+      // the worker uses this URL instead of template.headerContent — see
+      // whatsappService.prepareTemplateComponents.
+      headerMediaUrl,
     } = data;
 
     // Normalize the customer phone to digits-only so the same physical
@@ -33,6 +37,21 @@ class MessageService {
     // operator-typed values often have `+91` and spaces).
     if ((channel === 'whatsapp' || channel === 'sms') && recipientPhone) {
       recipientPhone = normalizePhone(recipientPhone);
+    }
+
+    // Per-tenant channel gating. Super-admin can disable any channel for any
+    // tenant via Organization.featureOverrides (plan baseline lives in
+    // backend/src/config/planFeatures.js). Reject early with a clear 403 so
+    // operators see why their send is rejected — better than failing at the
+    // worker when the underlying provider call is half-made.
+    const { Organization } = require('../models');
+    const { isChannelEnabled } = require('../utils/featureFlags');
+    const orgForFlags = await Organization.findByPk(organizationId);
+    if (!isChannelEnabled(orgForFlags, channel)) {
+      throw new AppError(
+        `The ${channel.toUpperCase()} channel is not enabled for your organization. Contact your administrator.`,
+        403
+      );
     }
 
     // Get organization settings to check approval requirements
@@ -50,6 +69,17 @@ class MessageService {
 
       if (!template) {
         throw new NotFoundError('Template');
+      }
+
+      // Reject a header-media override against a template that has no media
+      // header — the override would be silently ignored otherwise, which is
+      // exactly the kind of "send succeeded but wrong" failure we want to
+      // surface to the operator.
+      if (headerMediaUrl && !['image', 'video', 'document'].includes(template.headerType)) {
+        throw new AppError(
+          'Template has no media header — cannot override header media for this template.',
+          400
+        );
       }
 
       // Validate variables for template messages
@@ -212,9 +242,16 @@ class MessageService {
       messageData.subject = subject || 'Notification';
     }
 
-    // Store variables in metadata for template messages (needed for WhatsApp API)
-    if (templateId && variables && Object.keys(variables).length > 0) {
-      messageData.metadata = { variables };
+    // Store variables + per-send header-media override in metadata for template
+    // messages (the worker reads these when building the Meta payload).
+    if (templateId && (
+      (variables && Object.keys(variables).length > 0) ||
+      headerMediaUrl
+    )) {
+      messageData.metadata = {
+        ...(variables && Object.keys(variables).length > 0 ? { variables } : {}),
+        ...(headerMediaUrl ? { headerMediaUrl } : {}),
+      };
     }
 
     const message = await Message.create(messageData);
@@ -228,7 +265,24 @@ class MessageService {
    * Send bulk messages
    */
   async sendBulk(organizationId, sentBy, data) {
-    const { name, channel, templateId, recipients, priority, scheduledFor, subject, skipApproval } = data;
+    const {
+      name, channel, templateId, recipients, priority, scheduledFor, subject, skipApproval,
+      // Batch-wide default for the dynamic media header. Each recipient can
+      // still override this via their own `recipient.headerMediaUrl`.
+      headerMediaUrl: batchHeaderMediaUrl,
+    } = data;
+
+    // Channel gating — same rule as single send. Reject the whole batch
+    // before we spend any IO creating Message rows or the BulkMessageBatch.
+    const { Organization } = require('../models');
+    const { isChannelEnabled } = require('../utils/featureFlags');
+    const orgForFlags = await Organization.findByPk(organizationId);
+    if (!isChannelEnabled(orgForFlags, channel)) {
+      throw new AppError(
+        `The ${channel.toUpperCase()} channel is not enabled for your organization. Contact your administrator.`,
+        403
+      );
+    }
 
     // Validate template
     const template = await Template.findOne({
@@ -252,6 +306,10 @@ class MessageService {
     // Create messages for each recipient
     const messages = [];
     for (const recipient of recipients) {
+      // Per-recipient header override wins; otherwise inherit batch-wide; if
+      // neither is set, undefined → worker falls back to template's stored
+      // sample media (existing behavior, no regression).
+      const perRecipientHeader = recipient.headerMediaUrl || batchHeaderMediaUrl || undefined;
       const sendData = {
         channel,
         recipientName: recipient.name,
@@ -262,6 +320,7 @@ class MessageService {
         priority,
         scheduledFor,
         skipApproval,
+        ...(perRecipientHeader ? { headerMediaUrl: perRecipientHeader } : {}),
       };
 
       // Add channel-specific recipient field

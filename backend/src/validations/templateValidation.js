@@ -76,7 +76,10 @@ const templateValidation = {
     htmlBody: Joi.string().optional(),
     plainTextBody: Joi.string().optional(),
     subject: Joi.string().optional(),
-    footer: Joi.string().optional(),
+    // Allow null on `footer` so emptying the field actually clears it on
+    // update — without `.allow(null)` the frontend has to send `''` (which
+    // is also blocked by `Joi.string()` unless we allow it).
+    footer: Joi.string().allow(null, '').optional(),
     variables: Joi.array().items(Joi.string()).optional(),
     variableSamples: Joi.object()
       .pattern(Joi.string(), Joi.string().allow(''))
@@ -86,7 +89,9 @@ const templateValidation = {
     tags: Joi.array().items(Joi.string()).optional(),
     smsTemplateId: Joi.string().allow(null, '').optional(),
     whatsappTemplateId: Joi.string().allow(null, '').optional(),
-    headerType: Joi.string().valid('text', 'image', 'video', 'document', 'location').optional(),
+    // Allow null on headerType so the operator can switch a template back to
+    // "no header" — the controller persists null to the DB column.
+    headerType: Joi.string().valid('text', 'image', 'video', 'document', 'location').allow(null).optional(),
     headerContent: Joi.string().allow(null, '').optional(),
     category: Joi.string().valid('marketing', 'transactional', 'utility', 'authentication').optional(),
     language: Joi.string().optional(),

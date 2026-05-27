@@ -190,6 +190,17 @@ export const apiService = {
       const response = await api.delete(`/organizations/${id}`);
       return response.data;
     },
+    // Super-admin: per-tenant feature flags. Returns { plan, baseline,
+    // overrides, effective, keys } so the UI can show which flags came
+    // from the plan default vs an explicit override.
+    getFeatures: async (id: string | number) => {
+      const response = await api.get(`/organizations/${id}/features`);
+      return response.data;
+    },
+    updateFeatures: async (id: string | number, overrides: any) => {
+      const response = await api.put(`/organizations/${id}/features`, { overrides });
+      return response.data;
+    },
   },
 
   // Contacts
@@ -419,6 +430,27 @@ export const apiService = {
     bulkApprove: async (messageIds?: string[]) => {
       const response = await api.post('/messages/bulk-approve', { messageIds });
       return response.data;
+    },
+  },
+
+  // Campaigns (= bulk_message_batches, presented to operators as "Campaigns").
+  // All endpoints are gated server-side by canViewReports.
+  campaigns: {
+    list: async (params?: { search?: string; channel?: string; dateFrom?: string; dateTo?: string; page?: number; limit?: number }) => {
+      const r = await api.get('/campaigns', { params });
+      return r.data;
+    },
+    getById: async (id: number | string) => {
+      const r = await api.get(`/campaigns/${id}`);
+      return r.data;
+    },
+    listMessages: async (id: number | string, params?: { status?: string; page?: number; limit?: number }) => {
+      const r = await api.get(`/campaigns/${id}/messages`, { params });
+      return r.data;
+    },
+    exportCsv: async (id: number | string) => {
+      const r = await api.get(`/campaigns/${id}/export.csv`, { responseType: 'blob' });
+      return r.data as Blob;
     },
   },
 
@@ -667,6 +699,24 @@ export const apiService = {
     },
     resetPermissions: async (name: string) => {
       const r = await api.delete(`/roles/${name}/permissions`);
+      return r.data;
+    },
+    // Phase 2 — custom role CRUD. Cap-enforced server-side via
+    // Organization.featureFlags.maxCustomRoles.
+    create: async (data: { name: string; description?: string | null; permissions: Record<string, boolean> }) => {
+      const r = await api.post('/roles', data);
+      return r.data;
+    },
+    getById: async (id: number | string) => {
+      const r = await api.get(`/roles/id/${id}`);
+      return r.data;
+    },
+    update: async (id: number | string, data: { name?: string; description?: string | null; permissions?: Record<string, boolean> }) => {
+      const r = await api.put(`/roles/id/${id}`, data);
+      return r.data;
+    },
+    delete: async (id: number | string) => {
+      const r = await api.delete(`/roles/id/${id}`);
       return r.data;
     },
   },

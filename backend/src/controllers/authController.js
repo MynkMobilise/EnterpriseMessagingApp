@@ -181,12 +181,19 @@ class AuthController {
         ...(req.user.permissions || {}),
       };
 
+      // Per-tenant feature flags so the frontend can hide channel tabs /
+      // sidebar items without an extra round-trip. Mirrors the value the
+      // auth middleware exposes as req.featureFlags on every request.
+      const { effectiveFlags } = require('../utils/featureFlags');
+      const featureFlags = effectiveFlags(org || req.organization);
+
       res.json({
         success: true,
         data: {
           ...user,
           permissions: mergedPermissions,
           organization: org ? org.toJSON() : null,
+          featureFlags,
         },
       });
     } catch (error) {

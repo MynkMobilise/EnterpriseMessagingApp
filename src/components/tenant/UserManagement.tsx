@@ -22,6 +22,33 @@ import { User, UserRole, UserStatus, CreateUserPayload, UpdateUserPayload, DEFAU
 import { useOrganization } from '../../contexts/OrganizationContext';
 import { apiService } from '../../utils/api';
 
+// Shape of a row returned by /api/v1/roles. Mirrors the backend's enrichment:
+// for system rows, `name` is the legacy enum value (super_admin/...) and
+// `displayName` is the human label. Custom rows have name === displayName.
+export interface RoleOption {
+  id: number;
+  name: string;
+  displayName: string;
+  description?: string;
+  isSystem: boolean;
+  isSystemRole?: boolean;
+  roleKey?: string | null;
+  userCount?: number;
+  permissions?: Record<string, boolean>;
+}
+
+// Resolve the display label for a user's role. Prefers the actual Role row
+// (so a user assigned to a custom role like "Marketing Lead" shows that
+// label) and falls back to ROLE_LABELS when the role list hasn't loaded.
+function resolveUserRoleLabel(user: User, roles: RoleOption[]): string {
+  const userRoleId = (user as any).roleId as number | undefined;
+  if (userRoleId) {
+    const row = roles.find((r) => r.id === userRoleId);
+    if (row) return row.displayName || row.name;
+  }
+  return ROLE_LABELS[user.role] || user.role;
+}
+
 export function UserManagement() {
   const { organizations, currentOrganization } = useOrganization();
   const [users, setUsers] = useState<User[]>([]);
@@ -33,6 +60,25 @@ export function UserManagement() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  // All roles available to assign — system rows + any custom rows the tenant
+  // has created. Refetched when the modal opens to pick up brand-new custom
+  // roles without a full page reload.
+  const [availableRoles, setAvailableRoles] = useState<RoleOption[]>([]);
+
+  // Fetch the role list (system + custom) for the current org. Cheap — runs
+  // once on mount and whenever the user opens a create / edit modal so a
+  // freshly-created custom role shows up without a refresh.
+  const refreshRoles = async () => {
+    try {
+      const r = await apiService.roles.list();
+      if (r?.success && Array.isArray(r.data)) {
+        setAvailableRoles(r.data as RoleOption[]);
+      }
+    } catch (_) { /* non-fatal — modal still works with the cached list */ }
+  };
+  useEffect(() => {
+    if (currentOrganization) refreshRoles();
+  }, [currentOrganization?.id]);
 
   // Fetch users from API
   useEffect(() => {
@@ -54,6 +100,11 @@ export function UserManagement() {
             firstName: user.firstName,
             lastName: user.lastName,
             role: user.role,
+            // Phase 2: roleId is the source-of-truth for "which Role row this
+            // user belongs to". Carried through so the edit modal can resolve
+            // the right option (including custom roles) and the list view
+            // can display the role's display name.
+            roleId: user.roleId,
             status: user.status,
             phoneNumber: user.phoneNumber,
             department: user.department,
@@ -512,7 +563,7 @@ export function UserManagement() {
                         )}`}
                       >
                         <Shield className="w-3 h-3" />
-                        {ROLE_LABELS[user.role]}
+                        {resolveUserRoleLabel(user, availableRoles)}
                       </span>
                     </td>
                     <td className="px-6 py-4">
@@ -580,6 +631,7 @@ export function UserManagement() {
         <CreateUserModal
           organizations={organizations}
           currentOrganizationId={currentOrganization?.id}
+          availableRoles={availableRoles}
           onClose={() => setShowCreateModal(false)}
           onSubmit={handleCreateUser}
         />
@@ -590,6 +642,7 @@ export function UserManagement() {
         <EditUserModal
           user={selectedUser}
           organizations={organizations}
+          availableRoles={availableRoles}
           onClose={() => setShowEditModal(false)}
           onSubmit={(data) => handleUpdateUser(selectedUser.id, data)}
         />
@@ -611,11 +664,13 @@ export function UserManagement() {
 function CreateUserModal({
   organizations,
   currentOrganizationId,
+  availableRoles,
   onClose,
   onSubmit,
 }: {
   organizations: any[];
   currentOrganizationId?: string | number;
+  availableRoles: RoleOption[];
   onClose: () => void;
   onSubmit: (data: CreateUserPayload) => void;
 }) {
@@ -623,11 +678,17 @@ function CreateUserModal({
   // into a tenant via the org-switcher act in that tenant). Falls back to
   // organizations[0] if no current is provided so the form never breaks.
   const initialOrgId = currentOrganizationId ?? organizations[0]?.id ?? '';
+  // Default to the "operator" system row when available (and only if the
+  // role list has loaded — falls back to the legacy enum otherwise).
+  const defaultRole = availableRoles.find((r) => r.isSystem && r.roleKey === 'operator') || availableRoles[0];
   const [formData, setFormData] = useState<CreateUserPayload>({
     email: '',
     firstName: '',
     lastName: '',
-    role: 'operator',
+    // Legacy enum slot — we keep it populated for backend back-compat. The
+    // primary signal is `roleId` below.
+    role: (defaultRole?.roleKey as UserRole) || 'operator',
+    roleId: defaultRole?.id || null,
     organizationId: initialOrgId as any,
     phoneNumber: '',
     department: '',
@@ -736,33 +797,54 @@ function CreateUserModal({
             </div>
           </div>
 
-          {/* Role Selection */}
+          {/* Role Selection — dynamic list of system + custom roles. */}
           <div>
             <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
               Role *
             </label>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {(Object.keys(ROLE_LABELS) as UserRole[]).map((role) => (
-                <button
-                  key={role}
-                  onClick={() => setFormData({ ...formData, role })}
-                  className={`p-4 rounded-lg border-2 text-left transition-all ${
-                    formData.role === role
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <Shield className="w-4 h-4 text-blue-600" />
-                    <span className="text-sm text-gray-900 dark:text-white">
-                      {ROLE_LABELS[role]}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">
-                    {ROLE_DESCRIPTIONS[role]}
-                  </p>
-                </button>
-              ))}
+              {availableRoles.length === 0 ? (
+                <p className="text-sm text-gray-500 col-span-2">Loading roles…</p>
+              ) : (
+                availableRoles.map((r) => {
+                  const isActive = formData.roleId === r.id;
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => setFormData({
+                        ...formData,
+                        roleId: r.id,
+                        // Keep legacy enum in sync for system rows so the backend
+                        // back-compat path still resolves the same row. For
+                        // custom rows the enum stays as 'operator' (a safe
+                        // baseline) and the backend uses roleId instead.
+                        role: (r.roleKey as UserRole) || 'operator',
+                      })}
+                      className={`p-4 rounded-lg border-2 text-left transition-all ${
+                        isActive
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <Shield className="w-4 h-4 text-blue-600" />
+                        <span className="text-sm text-gray-900 dark:text-white">
+                          {r.displayName || r.name}
+                        </span>
+                        {!r.isSystem && (
+                          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300">
+                            custom
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        {r.description || ROLE_DESCRIPTIONS[(r.roleKey as UserRole) || 'operator'] || ''}
+                      </p>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
@@ -797,18 +879,29 @@ function CreateUserModal({
 function EditUserModal({
   user,
   organizations,
+  availableRoles,
   onClose,
   onSubmit,
 }: {
   user: User;
   organizations: any[];
+  availableRoles: RoleOption[];
   onClose: () => void;
   onSubmit: (data: UpdateUserPayload) => void;
 }) {
+  // Resolve the user's currently-assigned Role row. Prefer roleId when the
+  // backend has populated it; otherwise fall back to matching by the legacy
+  // enum (system rows expose it as `name`).
+  const userRoleId = (user as any).roleId as number | undefined;
+  const currentRole =
+    (userRoleId && availableRoles.find((r) => r.id === userRoleId))
+    || availableRoles.find((r) => r.isSystem && (r.roleKey || r.name) === user.role);
+
   const [formData, setFormData] = useState<UpdateUserPayload>({
     firstName: user.firstName,
     lastName: user.lastName,
     role: user.role,
+    roleId: currentRole?.id || null,
     status: user.status,
     phoneNumber: user.phoneNumber || '',
     department: user.department || '',
@@ -861,15 +954,27 @@ function EditUserModal({
                 Role
               </label>
               <select
-                value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
+                value={formData.roleId ?? ''}
+                onChange={(e) => {
+                  const id = e.target.value ? Number(e.target.value) : null;
+                  const picked = availableRoles.find((r) => r.id === id);
+                  setFormData({
+                    ...formData,
+                    roleId: id,
+                    role: (picked?.roleKey as UserRole) || 'operator',
+                  });
+                }}
                 className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
               >
-                {(Object.keys(ROLE_LABELS) as UserRole[]).map((role) => (
-                  <option key={role} value={role}>
-                    {ROLE_LABELS[role]}
-                  </option>
-                ))}
+                {availableRoles.length === 0 ? (
+                  <option value="">Loading…</option>
+                ) : (
+                  availableRoles.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.displayName || r.name}{r.isSystem ? '' : ' (custom)'}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
 

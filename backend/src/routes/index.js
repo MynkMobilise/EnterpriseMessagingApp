@@ -18,6 +18,7 @@ const migrationRoutes = require('./migration');
 const chatRoutes = require('./chat');
 const integrationRoutes = require('./integrations');
 const dashboardRoutes = require('./dashboard');
+const campaignRoutes = require('./campaigns');
 
 const router = express.Router();
 
@@ -41,6 +42,7 @@ router.use('/migration', migrationRoutes);
 router.use('/chat', chatRoutes);
 router.use('/integrations', integrationRoutes);
 router.use('/dashboard', dashboardRoutes);
+router.use('/campaigns', campaignRoutes);
 
 module.exports = router;
 

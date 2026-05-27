@@ -45,6 +45,9 @@ const messageValidation = {
     // gate ("Approve & Send"). The controller enforces the permission check —
     // the schema just allows the field through.
     skipApproval: Joi.boolean().optional(),
+    // Optional per-send override for the template's media header. Must be a
+    // local /uploads/... path produced by POST /api/v1/media.
+    headerMediaUrl: Joi.string().allow('', null).optional(),
   }),
 
   sendBulk: Joi.object({
@@ -70,11 +73,16 @@ const messageValidation = {
         }),
         name: Joi.string().optional(),
         variables: Joi.object().optional(),
+        // Per-recipient override for the template's media header (wins over
+        // the batch-wide headerMediaUrl below).
+        headerMediaUrl: Joi.string().allow('', null).optional(),
       })
     ).min(1).max(1000).required(),
     priority: Joi.string().valid('low', 'normal', 'high', 'urgent').optional(),
     scheduledFor: Joi.date().optional(),
     skipApproval: Joi.boolean().optional(),
+    // Batch-wide default for the dynamic media header.
+    headerMediaUrl: Joi.string().allow('', null).optional(),
   }),
 
   reject: Joi.object({

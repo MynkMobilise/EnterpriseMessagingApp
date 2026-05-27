@@ -21,6 +21,21 @@ export type PermissionKey =
 
 export type Role = 'super_admin' | 'admin' | 'manager' | 'operator' | 'viewer';
 
+// Per-tenant feature flags. Mirror of backend/src/config/planFeatures.js —
+// keys here should match what effectiveFlags(org) returns from /auth/me.
+export interface FeatureFlags {
+  channels?: { whatsapp?: boolean; sms?: boolean; email?: boolean; fcm?: boolean };
+  hrmsSync?: boolean;
+  liveChat?: boolean;
+  carouselTemplates?: boolean;
+  apiKeyIntegration?: boolean;
+  maxCustomRoles?: number;
+}
+
+export type FeatureKey =
+  | 'channels.whatsapp' | 'channels.sms' | 'channels.email' | 'channels.fcm'
+  | 'hrmsSync' | 'liveChat' | 'carouselTemplates' | 'apiKeyIntegration';
+
 export interface AuthUser {
   id: number;
   email: string;
@@ -30,6 +45,7 @@ export interface AuthUser {
   organizationId: number;
   permissions: Partial<Record<PermissionKey, boolean>>;
   organization?: { id: number; name: string; slug?: string; plan?: string } | null;
+  featureFlags?: FeatureFlags;
 }
 
 interface AuthContextType {
@@ -39,6 +55,9 @@ interface AuthContextType {
   hasPermission: (perm: PermissionKey) => boolean;
   /** True if the user holds any of the listed roles. */
   hasRole: (...roles: Role[]) => boolean;
+  /** True if the named feature is enabled for the current tenant. Accepts
+   *  dot-paths like 'channels.sms'. Super admin always passes. */
+  hasFeature: (key: FeatureKey) => boolean;
   /** Force a re-fetch of /auth/me (e.g. after role/permission change). */
   refresh: () => Promise<void>;
 }
@@ -87,9 +106,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return roles.includes(user.role);
   };
 
+  const hasFeature = (key: FeatureKey): boolean => {
+    if (!user) return false;
+    // Super admin can always reach every page — UI gating is just a quality-
+    // of-life signal, not a security boundary (backend enforces).
+    if (user.role === 'super_admin') return true;
+    const flags = user.featureFlags || {};
+    const v = key.split('.').reduce<any>((acc, k) => (acc == null ? undefined : acc[k]), flags);
+    return Boolean(v);
+  };
+
   return (
     <AuthContext.Provider
-      value={{ user, loading, hasPermission, hasRole, refresh: fetchMe }}
+      value={{ user, loading, hasPermission, hasRole, hasFeature, refresh: fetchMe }}
     >
       {children}
     </AuthContext.Provider>

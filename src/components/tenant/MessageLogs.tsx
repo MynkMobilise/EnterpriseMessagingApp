@@ -741,6 +741,19 @@ export function MessageLogs() {
                     </div>
                   </div>
 
+                  {/* Template Used — only renders when this message was sent
+                      via a template (not a free-text send). Shows the
+                      operator the exact template content that went out,
+                      with any variable substitutions applied from the
+                      stored metadata.variables map. */}
+                  {selectedLogData.template && (
+                    <TemplateUsedPanel
+                      template={selectedLogData.template}
+                      variables={selectedLogData.metadata?.variables || selectedLogData.variables || {}}
+                      headerMediaOverride={selectedLogData.metadata?.headerMediaUrl || null}
+                    />
+                  )}
+
                   {/* Trace Log Timeline */}
                   {selectedLogData.traceLogs && (
                     <div>
@@ -867,6 +880,175 @@ export function MessageLogs() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ----- Template Used panel (shown inside the message-detail modal) ----- */
+
+import { MEDIA_HOST } from '../../utils/api';
+
+interface TemplateLike {
+  id: number;
+  name: string;
+  channel?: string;
+  category?: string;
+  language?: string;
+  status?: string;
+  headerType?: 'text' | 'image' | 'video' | 'document' | 'location' | null;
+  headerContent?: string | null;
+  body?: string;
+  footer?: string | null;
+  buttons?: any[] | null;
+  variables?: string[] | null;
+}
+
+// Substitute {{1}}, {{name}}, etc. in `content` using the variables map that
+// was stored alongside the message. Falls back to the marker itself when a
+// value is missing — that way the operator sees clearly which slot was empty.
+function substituteVariables(content: string, vars: Record<string, string> | undefined): string {
+  if (!content) return '';
+  if (!vars) return content;
+  return content.replace(/\{\{\s*(\w+)\s*\}\}/g, (m, key) => {
+    const v = vars[key];
+    return v != null && String(v).trim() !== '' ? String(v) : m;
+  });
+}
+
+function TemplateUsedPanel({
+  template,
+  variables,
+  headerMediaOverride,
+}: {
+  template: TemplateLike;
+  variables: Record<string, string>;
+  headerMediaOverride?: string | null;
+}) {
+  const body = substituteVariables(template.body || '', variables);
+  const headerText = template.headerType === 'text'
+    ? substituteVariables(template.headerContent || '', variables)
+    : '';
+  const headerIsMedia = ['image', 'video', 'document'].includes(template.headerType || '');
+  // Per-message header override (Dynamic Media Header feature) wins over the
+  // template's stored sample so the operator sees the bytes that actually
+  // went out for this specific send.
+  const headerMediaUrl = headerIsMedia
+    ? (headerMediaOverride || template.headerContent || '')
+    : '';
+  const resolvedMediaUrl = headerMediaUrl
+    ? (headerMediaUrl.startsWith('http') ? headerMediaUrl : `${MEDIA_HOST}${headerMediaUrl}`)
+    : '';
+  const buttons = Array.isArray(template.buttons) ? template.buttons : [];
+  const varEntries = Object.entries(variables || {});
+
+  return (
+    <div>
+      <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">
+        Template Used
+      </h3>
+      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-4">
+        {/* Metadata strip */}
+        <div className="flex items-center flex-wrap gap-3 text-xs">
+          <span className="text-gray-900 dark:text-white font-semibold">{template.name}</span>
+          {template.channel && (
+            <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 capitalize">
+              {template.channel}
+            </span>
+          )}
+          {template.category && (
+            <span className="px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 capitalize">
+              {template.category}
+            </span>
+          )}
+          {template.language && (
+            <span className="text-gray-500">Language: <strong>{template.language}</strong></span>
+          )}
+          {template.status && (
+            <span className="text-gray-500">Status: <strong className="capitalize">{template.status}</strong></span>
+          )}
+        </div>
+
+        {/* WhatsApp-style preview of the actual sent content (resolved vars). */}
+        <div
+          className="rounded-lg p-3"
+          style={{
+            backgroundColor: '#efeae2',
+            backgroundImage: 'radial-gradient(rgba(0,0,0,0.04) 1px, transparent 1px)',
+            backgroundSize: '14px 14px',
+          }}
+        >
+          <div className="flex justify-end">
+            <div
+              className="max-w-[85%] rounded-lg shadow-sm overflow-hidden"
+              style={{ backgroundColor: '#d9fdd3' }}
+            >
+              {headerIsMedia && resolvedMediaUrl && (
+                <div className="bg-black/5">
+                  {template.headerType === 'image' && (
+                    <img src={resolvedMediaUrl} alt="" className="w-full max-h-48 object-cover" data-color />
+                  )}
+                  {template.headerType === 'video' && (
+                    <video src={resolvedMediaUrl} className="w-full max-h-48" controls data-color />
+                  )}
+                  {template.headerType === 'document' && (
+                    <div className="px-3 py-2 text-xs text-gray-700 bg-white/60">
+                      📄 Document attachment
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="px-3 py-2">
+                {headerText && (
+                  <p className="text-sm font-semibold text-gray-900 mb-1 whitespace-pre-wrap">
+                    {headerText}
+                  </p>
+                )}
+                <p className="text-[15px] text-gray-900 whitespace-pre-wrap leading-snug">
+                  {body || <span className="text-gray-400 italic">[empty body]</span>}
+                </p>
+                {template.footer && (
+                  <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">
+                    {template.footer}
+                  </p>
+                )}
+              </div>
+              {buttons.length > 0 && (
+                <div className="border-t border-black/5">
+                  {buttons.map((b: any, i: number) => (
+                    <div
+                      key={b.id || i}
+                      className="px-3 py-2 text-center text-sm text-[#00a5f4] border-b last:border-b-0 border-black/5 bg-white/70"
+                    >
+                      {b.text || b.value || `Button ${i + 1}`}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Variables used for THIS message — shown raw so the operator can
+            verify what was sent without having to read it out of the bubble. */}
+        {varEntries.length > 0 && (
+          <div>
+            <p className="text-xs uppercase tracking-wider text-gray-500 mb-2">Variables sent</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {varEntries.map(([key, value]) => (
+                <div
+                  key={key}
+                  className="flex items-center justify-between px-3 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs"
+                >
+                  <span className="text-gray-500">{`{{${key}}}`}</span>
+                  <span className="text-gray-900 dark:text-white truncate max-w-[60%]" title={String(value)}>
+                    {String(value) || <em className="text-gray-400">empty</em>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

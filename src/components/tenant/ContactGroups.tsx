@@ -893,10 +893,27 @@ function GroupEditor({
                       key={idx}
                       className="grid grid-cols-12 gap-2 items-start p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg"
                     >
-                      {/* Field */}
+                      {/* Field — when the user picks a field that's natively
+                          many-to-one with contacts (cost center, department,
+                          region, etc.), auto-switch the operator to "is any of"
+                          so they land on the multi-select UI instead of having
+                          to manually change the operator first. */}
                       <select
                         value={rule.field}
-                        onChange={(e) => updateRule(idx, { field: e.target.value, value: '' })}
+                        onChange={(e) => {
+                          const nextField = e.target.value;
+                          const MULTI_FIRST = new Set([
+                            'costCenterCode', 'costCenterName', 'department',
+                            'subDepartment', 'region', 'segmentName',
+                            'subSegmentName', 'designation',
+                          ]);
+                          const patch: any = { field: nextField, value: '' };
+                          if (MULTI_FIRST.has(nextField)) {
+                            patch.op = 'in';
+                            patch.value = [];
+                          }
+                          updateRule(idx, patch);
+                        }}
                         className="col-span-4 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 text-gray-900 dark:text-white"
                       >
                         {allowedFields.map((f) => (
@@ -924,6 +941,7 @@ function GroupEditor({
                             options={distincts}
                             value={Array.isArray(rule.value) ? (rule.value as string[]) : []}
                             onChange={(arr) => updateRule(idx, { value: arr })}
+                            fieldKey={rule.field}
                           />
                         ) : distincts.length > 0 && operatorDef?.value === 'equals' ? (
                           <select
@@ -1032,47 +1050,218 @@ function GroupEditor({
 /* ---- Multi-value picker (checkbox dropdown for `in` / `not_in`) -------- */
 
 function MultiValuePicker({
-  options, value, onChange,
+  options, value, onChange, fieldKey,
 }: {
   options: string[];
   value: string[];
   onChange: (next: string[]) => void;
+  /** Used to label the sample CSV file ("cost_center_code_sample.csv" etc). */
+  fieldKey?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+
   const toggle = (v: string) => {
     if (value.includes(v)) onChange(value.filter((x) => x !== v));
     else onChange([...value, v]);
   };
+
+  const filtered = (() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => o.toLowerCase().includes(q));
+  })();
+
+  const allShownSelected = filtered.length > 0 && filtered.every((o) => value.includes(o));
+
+  const toggleSelectAll = () => {
+    if (allShownSelected) {
+      // Deselect only the rows currently visible (respect any search filter).
+      onChange(value.filter((v) => !filtered.includes(v)));
+    } else {
+      const merged = Array.from(new Set([...value, ...filtered]));
+      onChange(merged);
+    }
+  };
+
+  // Parse pasted text or CSV/TXT file content into a list of codes. Accepts
+  // newline, comma, tab, or semicolon separators so operators can drop in
+  // whatever shape their HRMS exported (Excel column, one-per-line list etc).
+  const parseBulkText = (text: string): string[] => {
+    return text
+      .split(/[\r\n,;\t]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && s.toLowerCase() !== 'cost_center_code' && s.toLowerCase() !== 'code');
+  };
+
+  const applyBulk = () => {
+    const parsed = parseBulkText(bulkText);
+    if (parsed.length === 0) {
+      toast.error('No codes found in the input');
+      return;
+    }
+    // Keep only entries that actually exist in the distinct options — anything
+    // else would silently fail to match contacts.
+    const optionSet = new Set(options);
+    const matched = parsed.filter((p) => optionSet.has(p));
+    const unmatched = parsed.filter((p) => !optionSet.has(p));
+    const merged = Array.from(new Set([...value, ...matched]));
+    onChange(merged);
+    if (matched.length > 0) {
+      toast.success(`${matched.length} added`, {
+        description: unmatched.length > 0 ? `${unmatched.length} skipped (not found in contacts).` : undefined,
+      });
+    } else {
+      toast.error('None of those codes match values seen in your contacts.');
+    }
+    setBulkText('');
+    setBulkOpen(false);
+  };
+
+  const handleFileUpload = async (e: any) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setBulkText((prev: string) => (prev ? prev + '\n' + text : text));
+  };
+
+  const downloadSample = () => {
+    const label = fieldKey === 'costCenterCode' ? 'cost_center_code' : (fieldKey || 'value');
+    const sampleRows = options.slice(0, 5);
+    const padding = ['CC-1001', 'CC-1002', 'CC-1003'];
+    const rows = sampleRows.length > 0 ? sampleRows : padding;
+    const csv = [label, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${label}_sample.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
         className="w-full text-left text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 text-gray-900 dark:text-white truncate"
       >
-        {value.length === 0 ? <span className="text-gray-400">— select values —</span> : value.join(', ')}
+        {value.length === 0
+          ? <span className="text-gray-400">— select values —</span>
+          : value.length <= 3 ? value.join(', ') : `${value.length} selected`}
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-1">
-            {options.length === 0 ? (
-              <div className="px-2 py-1.5 text-xs text-gray-400">No values available</div>
-            ) : (
-              options.map((v) => (
-                <label
-                  key={v}
-                  className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700 rounded cursor-pointer text-sm"
+          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setBulkOpen(false); }} />
+          <div className="absolute z-20 mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg">
+            {/* Search + Select All + Bulk + Sample header */}
+            <div className="p-2 border-b border-gray-200 dark:border-gray-700 space-y-2">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search…"
+                className="w-full text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-2 py-1 text-gray-900 dark:text-white"
+              />
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <button
+                  onClick={toggleSelectAll}
+                  className="text-blue-600 hover:underline"
+                  disabled={filtered.length === 0}
                 >
-                  <input
-                    type="checkbox"
-                    checked={value.includes(v)}
-                    onChange={() => toggle(v)}
-                    className="w-3.5 h-3.5"
-                  />
-                  <span className="truncate">{v}</span>
-                </label>
-              ))
+                  {allShownSelected ? 'Clear shown' : 'Select all'} ({filtered.length})
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setBulkOpen((b) => !b)}
+                    className="text-blue-600 hover:underline"
+                    title="Paste or upload a list of codes"
+                  >
+                    Bulk import
+                  </button>
+                  <button
+                    onClick={downloadSample}
+                    className="text-blue-600 hover:underline"
+                    title="Download a sample CSV with the expected format"
+                  >
+                    Download sample
+                  </button>
+                </div>
+              </div>
+              {value.length > 0 && (
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span>{value.length} selected total</span>
+                  <button onClick={() => onChange([])} className="text-red-600 hover:underline">
+                    Clear all
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Bulk import panel */}
+            {bulkOpen && (
+              <div className="p-2 border-b border-gray-200 dark:border-gray-700 space-y-2 bg-gray-50 dark:bg-gray-900/50">
+                <textarea
+                  value={bulkText}
+                  onChange={(e) => setBulkText(e.target.value)}
+                  placeholder="Paste codes here — one per line, or comma / tab separated. Header row 'cost_center_code' is skipped."
+                  rows={4}
+                  className="w-full text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2 text-gray-900 dark:text-white resize-none"
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs text-blue-600 hover:underline cursor-pointer">
+                    Upload .csv / .txt
+                    <input
+                      type="file"
+                      accept=".csv,.txt"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setBulkText(''); setBulkOpen(false); }}
+                      className="text-xs px-2 py-1 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={applyBulk}
+                      disabled={!bulkText.trim()}
+                      className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
+
+            {/* List */}
+            <div className="max-h-48 overflow-y-auto p-1">
+              {filtered.length === 0 ? (
+                <div className="px-2 py-1.5 text-xs text-gray-400">
+                  {options.length === 0 ? 'No values available' : 'No matches'}
+                </div>
+              ) : (
+                filtered.map((v) => (
+                  <label
+                    key={v}
+                    className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700 rounded cursor-pointer text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={value.includes(v)}
+                      onChange={() => toggle(v)}
+                      className="w-3.5 h-3.5"
+                    />
+                    <span className="truncate">{v}</span>
+                  </label>
+                ))
+              )}
+            </div>
           </div>
         </>
       )}

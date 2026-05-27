@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useOrganization } from '../../contexts/OrganizationContext';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   Plus,
   Search,
@@ -65,6 +66,7 @@ interface Contact {
 
 export function Contacts() {
   const { currentOrganization } = useOrganization();
+  const { hasFeature } = useAuth();
   const [showAddContact, setShowAddContact] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [tagFilter, setTagFilter] = useState('all');
@@ -184,6 +186,14 @@ export function Contacts() {
 
     fetchContacts();
   }, [currentOrganization?.id, currentPage]);
+
+  // Reset to page 1 whenever the user changes a filter / search — otherwise
+  // they can end up on page 5 with zero matches just because the page they
+  // were viewing has no rows that match the new query.
+  useEffect(() => {
+    if (currentPage !== 1) setCurrentPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, tagFilter, statusFilter, activeStatFilter]);
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const sanitized = sanitizeInput(e.target.value, 100);
@@ -698,8 +708,12 @@ export function Contacts() {
     return matchesSearch && matchesTag && matchesStatus && matchesStatFilter;
   });
 
+  // Stats: `total` is the authoritative server-side count from the pagination
+  // metadata so the dashboard card stays correct as the user pages. The other
+  // three counts are page-scoped because the API doesn't expose org-wide opt-in
+  // / status aggregates yet — surfaced as approximations on the visible page.
   const stats = {
-    total: contacts.length,
+    total: totalRecords,
     active: contacts.filter((c) => c.status === 'active').length,
     whatsapp: contacts.filter((c) => c.whatsappOptIn).length,
     sms: contacts.filter((c) => c.smsOptIn).length,
@@ -734,14 +748,19 @@ export function Contacts() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={openHrmsModal}
-            className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2"
-            title="Sync contacts from an external HRMS API"
-          >
-            <Database className="w-4 h-4" />
-            HRMS Sync
-          </button>
+          {/* HRMS sync is a paid-tier feature; hide the button when the tenant
+              doesn't have the hrmsSync feature flag. Backend also 403s the
+              /contacts/hrms/* endpoints in that case. */}
+          {hasFeature('hrmsSync') && (
+            <button
+              onClick={openHrmsModal}
+              className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2"
+              title="Sync contacts from an external HRMS API"
+            >
+              <Database className="w-4 h-4" />
+              HRMS Sync
+            </button>
+          )}
           <button
             onClick={handleImport}
             className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2"

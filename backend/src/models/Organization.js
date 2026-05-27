@@ -71,6 +71,15 @@ const Organization = sequelize.define('organizations', {
   settings: {
     type: DataTypes.JSON,
   },
+  // Per-tenant deltas applied on top of the plan-tier baseline defined in
+  // backend/src/config/planFeatures.js. Only stores fields the super admin
+  // explicitly overrode — null / {} means "use the plan defaults". Resolved
+  // by utils/featureFlags.effectiveFlags(org).
+  featureOverrides: {
+    type: DataTypes.JSON,
+    field: 'feature_overrides',
+    allowNull: true,
+  },
   metadata: {
     type: DataTypes.JSON,
   },

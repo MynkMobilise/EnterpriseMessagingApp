@@ -21,11 +21,14 @@ import { ERPIntegrations } from './components/tenant/ERPIntegrations';
 import { BillingUsage } from './components/tenant/BillingUsage';
 import { TenantSettings } from './components/tenant/TenantSettings';
 import { OrganizationManagement } from './components/tenant/OrganizationManagement';
+import { TenantFeatures } from './components/admin/TenantFeatures';
 import { UserManagement } from './components/tenant/UserManagement';
 import { RoleManagement } from './components/tenant/RoleManagement';
 import { ApprovalCenter } from './components/tenant/ApprovalCenter';
 import { MISReports } from './components/tenant/MISReports';
 import { LeadershipDashboard } from './components/tenant/LeadershipDashboard';
+import { Campaigns } from './components/tenant/Campaigns';
+import { CampaignDetail } from './components/tenant/CampaignDetail';
 import { LiveChat } from './components/tenant/LiveChat';
 import { ContactGroups } from './components/tenant/ContactGroups';
 
@@ -195,6 +198,22 @@ export default function App() {
                 }
               />
               <Route
+                path="/campaigns"
+                element={
+                  <RequirePermission anyOf={['canViewReports']}>
+                    <Campaigns />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="/campaigns/:id"
+                element={
+                  <RequirePermission anyOf={['canViewReports']}>
+                    <CampaignDetail />
+                  </RequirePermission>
+                }
+              />
+              <Route
                 path="/leadership"
                 element={
                   <RequirePermission anyOf={['canViewLeadership']}>
@@ -247,6 +266,14 @@ export default function App() {
                 element={
                   <RequirePermission role="super_admin">
                     <OrganizationManagement />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="/admin/tenant-features"
+                element={
+                  <RequirePermission role="super_admin">
+                    <TenantFeatures />
                   </RequirePermission>
                 }
               />

@@ -171,11 +171,33 @@ class OrganizationService {
       ssoDefaultRole: 'operator',
     });
 
+    // Seed the 5 system roles for this brand-new org so the first admin user
+    // (created below) and any future users can be assigned a roleId without
+    // waiting for the migration script to be re-run.
+    try {
+      const roleService = require('./roleService');
+      await roleService.seedSystemRolesForOrg(organization.id);
+    } catch (e) {
+      // Non-fatal: the migration's seed step will eventually catch this up.
+      console.warn('seedSystemRolesForOrg failed for new org:', e.message);
+    }
+
     // Auto-create admin user. Initial password is generated; user is forced to
     // change it on first login via the existing must-change-password flow.
     const initialPassword = generateInitialPassword();
     const passwordHash = await bcrypt.hash(initialPassword, 10);
     const adminPermissions = authService.getDefaultPermissions('admin');
+
+    // Look up the seeded "admin" system Role row for this org and link the
+    // new user via roleId. Cheap — the seed runs above. If for any reason it
+    // failed, the legacy enum field still keeps the user working.
+    let adminRoleId = null;
+    try {
+      const roleService = require('./roleService');
+      const adminRole = await roleService.findSystemRoleByKey(organization.id, 'admin');
+      adminRoleId = adminRole ? adminRole.id : null;
+    } catch (_) { /* non-fatal */ }
+
     let adminUser;
     try {
       adminUser = await User.create({
@@ -185,6 +207,7 @@ class OrganizationService {
         firstName: 'Admin',
         lastName: name.split(/\s+/)[0] || 'User',
         role: 'admin',
+        roleId: adminRoleId,
         status: 'active',
         emailVerified: false,
         mustChangePassword: true,

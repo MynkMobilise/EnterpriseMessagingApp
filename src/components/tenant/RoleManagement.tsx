@@ -16,13 +16,21 @@ import {
   Loader2,
   RotateCcw,
   Lock,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface Role {
-  name: string;
+  // Phase 2: every row in the Role table has a numeric id. System rows
+  // additionally have `roleKey` (the legacy enum value); custom rows don't.
+  id: number;
+  roleKey?: string | null;
+  isSystem: boolean;
+  // Convenience alias on the API payload for back-compat with earlier UI code.
+  name: string; // For system rows: equals roleKey. For custom rows: the display name.
   displayName: string;
   description: string;
   permissions: Record<string, boolean>;
@@ -55,9 +63,18 @@ export function RoleManagement() {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
   const [editingRole, setEditingRole] = useState<Role | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
 
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canEditRoles = hasPermission('canAssignRoles');
+  // Cap comes from the tenant feature-flag set populated on /auth/me. A
+  // starter-plan tenant has 0; Pro has 3; Enterprise has 20 by default. The
+  // super admin can override per-tenant via the Tenant Features page.
+  const maxCustomRoles = Number(user?.featureFlags?.maxCustomRoles ?? 0);
+  const usedCustomRoles = roles.filter((r) => !r.isSystem).length;
+  const remainingCustomSlots = Math.max(0, maxCustomRoles - usedCustomRoles);
+  const canCreateCustomRole = canEditRoles && maxCustomRoles > 0;
 
   // Fetch roles and stats
   useEffect(() => {
@@ -131,8 +148,14 @@ export function RoleManagement() {
     role.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const getRoleBadgeColor = (roleName: string) => {
-    switch (roleName) {
+  const getRoleBadgeColor = (role: Role) => {
+    // System rows colored by their enum key; custom rows always orange so
+    // they're visually distinguishable from the built-ins at a glance.
+    if (!role.isSystem) {
+      return 'bg-orange-100 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300';
+    }
+    const key = role.roleKey || role.name;
+    switch (key) {
       case 'super_admin':
         return 'bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300';
       case 'admin':
@@ -177,6 +200,29 @@ export function RoleManagement() {
     }
   };
 
+  const handleDeleteCustomRole = async (role: Role) => {
+    if (role.isSystem) return;
+    if (!window.confirm(`Delete the "${role.displayName}" role? This cannot be undone.`)) return;
+    setDeletingIds((s) => new Set([...s, role.id]));
+    try {
+      const r = await apiService.roles.delete(role.id);
+      if (r?.success) {
+        toast.success(`Deleted ${role.displayName}`);
+        await refetchRoles();
+      } else {
+        toast.error('Delete failed', { description: r?.error?.message });
+      }
+    } catch (e: any) {
+      toast.error('Delete failed', { description: e?.response?.data?.error?.message || e?.message });
+    } finally {
+      setDeletingIds((s) => {
+        const next = new Set(s);
+        next.delete(role.id);
+        return next;
+      });
+    }
+  };
+
   return (
     <div className="colorful p-6 space-y-6">
       {/* Page Header */}
@@ -184,9 +230,47 @@ export function RoleManagement() {
         <div>
           <h1 className="text-2xl text-gray-900 dark:text-white">Role Management</h1>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            View and manage system roles and permissions
+            System roles ship with the platform. Custom roles let you carve out
+            permissions tailored to your team.
           </p>
         </div>
+        {canEditRoles && (
+          <div className="flex items-center gap-3">
+            {maxCustomRoles > 0 && (
+              <div className="text-xs text-gray-600 dark:text-gray-400 hidden md:block">
+                <strong>{usedCustomRoles}</strong> of {maxCustomRoles} custom roles used
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (!canCreateCustomRole) {
+                  toast.error('Custom roles are not enabled for your plan. Contact your administrator.');
+                  return;
+                }
+                if (remainingCustomSlots <= 0) {
+                  toast.error(
+                    `You've used all ${maxCustomRoles} custom-role slots. Contact your administrator to increase the limit.`
+                  );
+                  return;
+                }
+                setShowCreateModal(true);
+              }}
+              disabled={!canCreateCustomRole || remainingCustomSlots <= 0}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                !canCreateCustomRole
+                  ? 'Custom roles are not enabled for your plan'
+                  : remainingCustomSlots <= 0
+                    ? `All ${maxCustomRoles} custom-role slots are in use`
+                    : 'Create a new custom role'
+              }
+            >
+              <Plus className="w-4 h-4" />
+              Create Custom Role
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Stats Cards */}
@@ -265,7 +349,7 @@ export function RoleManagement() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredRoles.map((role) => (
             <div
-              key={role.name}
+              key={role.id}
               className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6 hover:shadow-lg transition-shadow"
             >
               <div className="flex items-start justify-between mb-4">
@@ -275,9 +359,9 @@ export function RoleManagement() {
                       {role.displayName}
                     </h3>
                     <span
-                      className={`text-xs px-2 py-1 rounded-full ${getRoleBadgeColor(role.name)}`}
+                      className={`text-xs px-2 py-1 rounded-full ${getRoleBadgeColor(role)}`}
                     >
-                      {role.name}
+                      {role.isSystem ? (role.roleKey || role.name) : 'custom'}
                     </span>
                   </div>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
@@ -306,6 +390,17 @@ export function RoleManagement() {
                     >
                       <Edit className="w-4 h-4" />
                       Edit
+                    </button>
+                  )}
+                  {canEditRoles && !role.isSystem && (
+                    <button
+                      onClick={() => handleDeleteCustomRole(role)}
+                      disabled={deletingIds.has(role.id) || role.userCount > 0}
+                      className="text-sm text-red-600 dark:text-red-400 hover:underline flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={role.userCount > 0 ? `Reassign ${role.userCount} user(s) first` : 'Delete this custom role'}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete
                     </button>
                   )}
                 </div>
@@ -364,7 +459,7 @@ export function RoleManagement() {
               <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                 {filteredRoles.map((role) => (
                   <tr
-                    key={role.name}
+                    key={role.id}
                     className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                   >
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -374,9 +469,9 @@ export function RoleManagement() {
                             {role.displayName}
                           </div>
                           <span
-                            className={`text-xs px-2 py-1 rounded-full inline-block mt-1 ${getRoleBadgeColor(role.name)}`}
+                            className={`text-xs px-2 py-1 rounded-full inline-block mt-1 ${getRoleBadgeColor(role)}`}
                           >
-                            {role.name}
+                            {role.isSystem ? (role.roleKey || role.name) : 'custom'}
                           </span>
                         </div>
                       </div>
@@ -434,6 +529,17 @@ export function RoleManagement() {
                             Edit
                           </button>
                         )}
+                        {canEditRoles && !role.isSystem && (
+                          <button
+                            onClick={() => handleDeleteCustomRole(role)}
+                            disabled={deletingIds.has(role.id) || role.userCount > 0}
+                            className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                            title={role.userCount > 0 ? `Reassign ${role.userCount} user(s) first` : 'Delete this custom role'}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -452,6 +558,20 @@ export function RoleManagement() {
           onClose={() => setEditingRole(null)}
           onSaved={() => {
             setEditingRole(null);
+            refetchRoles();
+          }}
+        />
+      )}
+
+      {/* Create Custom Role Modal */}
+      {showCreateModal && (
+        <CreateCustomRoleModal
+          permissionLabels={permissionLabels}
+          remainingSlots={remainingCustomSlots}
+          maxSlots={maxCustomRoles}
+          onClose={() => setShowCreateModal(false)}
+          onCreated={() => {
+            setShowCreateModal(false);
             refetchRoles();
           }}
         />
@@ -726,3 +846,179 @@ function RolePermissionsEditor({
   );
 }
 
+/* ----------------------- Create Custom Role Modal ----------------------- */
+
+function CreateCustomRoleModal({
+  permissionLabels,
+  remainingSlots,
+  maxSlots,
+  onClose,
+  onCreated,
+}: {
+  permissionLabels: Record<string, string>;
+  remainingSlots: number;
+  maxSlots: number;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  // Sensible operator-level defaults — tenant Admin fine-tunes from here.
+  const initialPerms: Record<string, boolean> = {
+    canSendMessages: true,
+    canApproveMessages: false,
+    canManageUsers: false,
+    canManageTemplates: false,
+    canManageContacts: true,
+    canViewReports: false,
+    canManageSettings: false,
+    canManageAPIKeys: false,
+    canAssignRoles: false,
+    canManageOrganization: false,
+    canViewLiveChat: true,
+    canViewLeadership: false,
+  };
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [perms, setPerms] = useState<Record<string, boolean>>(initialPerms);
+  const [saving, setSaving] = useState(false);
+  const keys = Object.keys(permissionLabels);
+
+  const toggle = (k: string) => setPerms((p) => ({ ...p, [k]: !p[k] }));
+
+  const handleSave = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      toast.error('Role name is required');
+      return;
+    }
+    setSaving(true);
+    try {
+      const r = await apiService.roles.create({
+        name: trimmed,
+        description: description.trim() || null,
+        permissions: perms,
+      });
+      if (r?.success) {
+        toast.success(`Created "${r.data.displayName}"`);
+        onCreated();
+      } else {
+        toast.error('Create failed', { description: r?.error?.message });
+      }
+    } catch (e: any) {
+      toast.error('Create failed', {
+        description: e?.response?.data?.error?.message || e?.message,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg text-gray-900 dark:text-white">Create Custom Role</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              {remainingSlots} of {maxSlots} custom-role slot{maxSlots === 1 ? '' : 's'} remaining
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+            aria-label="Close"
+          >
+            <XCircle className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div>
+            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">
+              Role name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value.slice(0, 64))}
+              placeholder="e.g. Marketing Lead, Approver, Support Tier 1"
+              className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">
+              Description (optional)
+            </label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value.slice(0, 200))}
+              placeholder="What does this role do?"
+              className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+            />
+          </div>
+
+          <div>
+            <p className="text-sm text-gray-700 dark:text-gray-300 mb-3">Permissions</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {keys.map((key) => {
+                const enabled = !!perms[key];
+                return (
+                  <button
+                    type="button"
+                    key={key}
+                    onClick={() => toggle(key)}
+                    className={`flex items-center justify-between p-3 rounded-lg border text-left transition-colors ${
+                      enabled
+                        ? 'bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-800'
+                        : 'bg-gray-50 border-gray-200 dark:bg-gray-800 dark:border-gray-700'
+                    }`}
+                  >
+                    <span className="text-sm text-gray-900 dark:text-white">
+                      {permissionLabels[key] || key}
+                    </span>
+                    <div
+                      className={`w-10 h-6 rounded-full transition-colors relative flex-shrink-0 ${
+                        enabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                      }`}
+                    >
+                      <div
+                        className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                          enabled ? 'translate-x-4' : 'translate-x-0.5'
+                        }`}
+                      />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || !name.trim()}
+            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            Create role
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

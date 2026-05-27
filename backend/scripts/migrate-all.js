@@ -49,6 +49,8 @@ const MIGRATIONS = [
   'migrate-create-contact-group-user-assignments.js',
   'migrate-create-org-role-permissions.js',
   'migrate-add-variable-samples.js',
+  'migrate-add-feature-overrides.js',
+  'migrate-create-roles.js',
 ];
 
 function runOne(name) {

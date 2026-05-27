@@ -55,9 +55,11 @@ const upload = multer({
 // All routes require authentication
 router.use(authenticate);
 
-// Upload media
+// Upload media — accept either template managers (for the Media Library) or
+// senders (for the Dynamic Media Header on outbound sends). Read/list/delete
+// stay locked to template managers so senders can't poke around the library.
 router.post('/',
-  requirePermission('canManageTemplates'),
+  requirePermission(['canManageTemplates', 'canSendMessages']),
   upload.single('file'),
   mediaController.upload
 );

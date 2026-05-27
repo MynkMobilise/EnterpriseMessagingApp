@@ -34,5 +34,11 @@ router.put(
 // Delete organization (only super admin)
 router.delete('/:id', organizationController.delete);
 
+// Super-admin: per-tenant feature flags. Returns plan baseline + overrides +
+// effective for the UI; PUT body replaces the entire `featureOverrides` JSON.
+// Controller enforces the super_admin role check.
+router.get('/:id/features', organizationController.getFeatures);
+router.put('/:id/features', organizationController.updateFeatures);
+
 module.exports = router;
 

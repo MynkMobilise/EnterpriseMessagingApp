@@ -106,6 +106,58 @@ class RoleController {
       next(error);
     }
   };
+
+  /**
+   * Phase 2 — custom role CRUD. Cap enforced by the service via the tenant's
+   * maxCustomRoles feature flag.
+   */
+  createCustom = async (req, res, next) => {
+    try {
+      const role = await roleService.createCustomRole(
+        req.organizationId,
+        req.user?.id,
+        req.body || {}
+      );
+      res.status(201).json({ success: true, data: role, message: 'Custom role created' });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  updateCustom = async (req, res, next) => {
+    try {
+      const role = await roleService.updateCustomRole(
+        req.organizationId,
+        req.params.id,
+        req.body || {}
+      );
+      res.json({ success: true, data: role, message: 'Role updated' });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  deleteCustom = async (req, res, next) => {
+    try {
+      await roleService.deleteCustomRole(req.organizationId, req.params.id);
+      res.json({ success: true, message: 'Role deleted' });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * Fetch a role by primary key (used by the UI's permission-editor modal).
+   */
+  getById = async (req, res, next) => {
+    try {
+      const role = await roleService.getRoleById(req.params.id, req.organizationId);
+      if (!role) return res.status(404).json({ success: false, error: { message: 'Role not found' } });
+      res.json({ success: true, data: role });
+    } catch (error) {
+      next(error);
+    }
+  };
 }
 
 module.exports = new RoleController();

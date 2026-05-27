@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { apiService } from '../../utils/api';
 import { OrganizationSwitcher } from '../OrganizationSwitcher';
 import { OrganizationProvider } from '../../contexts/OrganizationContext';
-import { useAuth, PermissionKey, Role } from '../../contexts/AuthContext';
+import { useAuth, PermissionKey, Role, FeatureKey } from '../../contexts/AuthContext';
 import { ImpersonateUser } from '../ImpersonateUser';
 import { ChangePassword } from '../auth/ChangePassword';
 import { Toaster, toast } from 'sonner';
@@ -11,7 +11,7 @@ import {
   Home, Send, FileText, Image, Activity, Webhook, Blocks, CreditCard,
   Settings, Building2, Bell, Moon, Sun, ChevronDown, ChevronLeft, ChevronRight,
   Menu, X, LogOut, Lock, User, Users, CheckCircle, BarChart3, Shield,
-  MessageCircle, UsersRound, LineChart,
+  MessageCircle, UsersRound, LineChart, Settings2, Megaphone,
 } from 'lucide-react';
 
 type NavItem = {
@@ -23,13 +23,16 @@ type NavItem = {
   anyOf?: PermissionKey[];
   /** Restrict the item to one or more roles (in addition to anyOf). */
   role?: Role | Role[];
+  /** Hide the item unless this tenant feature flag is enabled. Used to hide
+   *  per-tenant disabled features like Live Chat / API Integrations / HRMS. */
+  feature?: FeatureKey;
 };
 
 // Permission gating must match the route guards in App.tsx — if these drift,
 // users will see menu items that 403 on click.
 const NAV: NavItem[] = [
   { to: '/home', label: 'Home Dashboard', icon: Home, section: 'ops' },
-  { to: '/chat', label: 'Live Chat', icon: MessageCircle, section: 'ops', anyOf: ['canViewLiveChat'] },
+  { to: '/chat', label: 'Live Chat', icon: MessageCircle, section: 'ops', anyOf: ['canViewLiveChat'], feature: 'liveChat' },
   { to: '/send', label: 'Send Message', icon: Send, section: 'ops', anyOf: ['canSendMessages'] },
   { to: '/templates', label: 'Templates', icon: FileText, section: 'ops', anyOf: ['canManageTemplates'] },
   { to: '/contacts', label: 'Contacts', icon: Users, section: 'ops', anyOf: ['canManageContacts'] },
@@ -38,19 +41,21 @@ const NAV: NavItem[] = [
   { to: '/logs', label: 'Message Logs', icon: Activity, section: 'ops', anyOf: ['canViewReports'] },
   { to: '/approval', label: 'Approval Center', icon: CheckCircle, section: 'ops', anyOf: ['canApproveMessages'] },
   { to: '/reports', label: 'MIS Reports', icon: BarChart3, section: 'ops', anyOf: ['canViewReports'] },
+  { to: '/campaigns', label: 'Campaign Reports', icon: Megaphone, section: 'ops', anyOf: ['canViewReports'] },
   { to: '/leadership', label: 'Leadership', icon: LineChart, section: 'ops', anyOf: ['canViewLeadership'] },
   { to: '/users', label: 'User Management', icon: User, section: 'admin', anyOf: ['canManageUsers'] },
   { to: '/roles', label: 'Role Management', icon: Shield, section: 'admin', anyOf: ['canAssignRoles', 'canManageUsers'] },
   { to: '/webhooks', label: 'Webhook Events', icon: Webhook, section: 'admin', anyOf: ['canManageSettings'] },
-  { to: '/erp', label: 'Integrations', icon: Blocks, section: 'admin', anyOf: ['canManageSettings'] },
+  { to: '/erp', label: 'Integrations', icon: Blocks, section: 'admin', anyOf: ['canManageSettings'], feature: 'apiKeyIntegration' },
   { to: '/billing', label: 'Billing & Usage', icon: CreditCard, section: 'admin', anyOf: ['canManageOrganization'] },
   { to: '/organizations', label: 'Organizations', icon: Building2, section: 'admin', role: 'super_admin' },
+  { to: '/admin/tenant-features', label: 'Tenant Features', icon: Settings2, section: 'admin', role: 'super_admin' },
   { to: '/settings', label: 'Settings', icon: Settings, section: 'admin', anyOf: ['canManageSettings'] },
 ];
 
 export function AppLayout() {
   const navigate = useNavigate();
-  const { user, hasPermission, hasRole, refresh: refreshAuth } = useAuth();
+  const { user, hasPermission, hasRole, hasFeature, refresh: refreshAuth } = useAuth();
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
@@ -68,6 +73,9 @@ export function AppLayout() {
       const roles = Array.isArray(item.role) ? item.role : [item.role];
       if (!hasRole(...roles)) return false;
     }
+    // Per-tenant feature flag check. Super admin always passes (hasFeature
+    // short-circuits to true) so they can see every menu in any tenant.
+    if (item.feature && !hasFeature(item.feature)) return false;
     if (item.anyOf && item.anyOf.length > 0) {
       return item.anyOf.some((p) => hasPermission(p));
     }

@@ -1,4 +1,5 @@
 import { MessageSquare, Phone, Mail, Bell } from 'lucide-react';
+import { useAuth } from '../../../contexts/AuthContext';
 
 /**
  * Channel selector — mirrors the AppLayout main sidebar pattern. Uses a
@@ -12,13 +13,18 @@ interface ChannelSelectorProps {
 }
 
 const CHANNELS = [
-  { id: 'whatsapp' as const, name: 'WhatsApp', icon: MessageSquare },
-  { id: 'sms' as const, name: 'SMS', icon: Phone },
-  { id: 'email' as const, name: 'Email', icon: Mail },
-  { id: 'fcm' as const, name: 'FCM', icon: Bell },
+  { id: 'whatsapp' as const, name: 'WhatsApp', icon: MessageSquare, feature: 'channels.whatsapp' as const },
+  { id: 'sms' as const, name: 'SMS', icon: Phone, feature: 'channels.sms' as const },
+  { id: 'email' as const, name: 'Email', icon: Mail, feature: 'channels.email' as const },
+  { id: 'fcm' as const, name: 'FCM', icon: Bell, feature: 'channels.fcm' as const },
 ];
 
 export function ChannelSelector({ channel, onChannelChange }: ChannelSelectorProps) {
+  const { hasFeature } = useAuth();
+  // Hide channels that the super admin has disabled for this tenant. Backend
+  // also 403s on send so this is just a UX nicety — operators don't see
+  // tabs they can't use.
+  const visibleChannels = CHANNELS.filter((ch) => hasFeature(ch.feature));
   return (
     <aside className="sm-channel-rail">
       <style>{`
@@ -42,7 +48,7 @@ export function ChannelSelector({ channel, onChannelChange }: ChannelSelectorPro
         Channel
       </p>
       <nav className="sm-channel-rail-nav">
-        {CHANNELS.map((ch) => {
+        {visibleChannels.map((ch) => {
           const Icon = ch.icon;
           const isActive = channel === ch.id;
           return (

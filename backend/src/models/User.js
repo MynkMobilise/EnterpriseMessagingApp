@@ -44,6 +44,16 @@ const User = sequelize.define('users', {
     defaultValue: 'operator',
     allowNull: false,
   },
+  // Phase 2 RBAC: points at a row in the `roles` table (system or custom).
+  // Backfilled per-org by the migration from the `role` enum. Auth middleware
+  // reads permissions from this row when present and falls back to the legacy
+  // ENUM defaults when null (e.g. legacy code that inserts a User without
+  // setting roleId).
+  roleId: {
+    type: DataTypes.BIGINT,
+    allowNull: true,
+    field: 'role_id',
+  },
   status: {
     type: DataTypes.ENUM('active', 'inactive', 'suspended', 'pending'),
     defaultValue: 'pending',

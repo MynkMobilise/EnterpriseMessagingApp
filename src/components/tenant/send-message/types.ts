@@ -7,6 +7,13 @@ export interface Recipient {
   email?: string;
   fcmToken?: string;
   name?: string;
+  // Per-recipient dynamic-media override. When set, the backend uses this
+  // /uploads/... URL as the template header media for this one recipient,
+  // taking precedence over the batch-wide MessageData.headerMediaUrl.
+  headerMediaUrl?: string;
+  // Display-only — original filename of the uploaded media so the row UI
+  // can show "invoice-9301.pdf" instead of the opaque server path.
+  headerMediaName?: string;
 }
 
 export interface Template {
@@ -55,5 +62,11 @@ export interface MessageData {
   priority?: 'low' | 'normal' | 'high' | 'urgent';
   scheduledFor?: string;
   skipApproval?: boolean;
+  // Per-send override for the template's media header — a local /uploads/...
+  // URL returned by POST /api/v1/media. When set, the backend uses this file
+  // as the runtime header media instead of template.headerContent. In bulk
+  // mode, this is the batch-wide default; each recipient can still override
+  // via their own Recipient.headerMediaUrl.
+  headerMediaUrl?: string;
 }
 

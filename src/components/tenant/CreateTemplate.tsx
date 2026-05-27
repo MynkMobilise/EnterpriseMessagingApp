@@ -478,9 +478,15 @@ export function CreateTemplate({ onClose, onSave, templateId: templateIdProp }: 
 
       // Channel-specific fields
       if (channel === 'whatsapp') {
-        templateData.headerType = headerType !== 'none' ? headerType : undefined;
-        templateData.headerContent = headerText || undefined;
-        templateData.footer = footerText || undefined;
+        // When the operator picked "None" we need to actively CLEAR the
+        // saved header — sending `undefined` drops the field from the PUT
+        // body (axios omits undefined keys), so the backend leaves the
+        // previous header_type / header_content in place and the change
+        // silently doesn't apply. Send `null` to explicitly null out the
+        // columns. Same applies to footer when emptied.
+        templateData.headerType = headerType !== 'none' ? headerType : null;
+        templateData.headerContent = headerType !== 'none' ? (headerText || null) : null;
+        templateData.footer = footerText || null;
         templateData.buttons = buttons.length > 0 ? buttons : undefined;
 
         // Carousel: persist template type + per-card definitions. The body

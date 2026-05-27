@@ -71,9 +71,18 @@ class UserService {
 
   /**
    * Create user
+   *
+   * Accepts EITHER:
+   *   - `roleId` (Phase 2 — points at a row in the `roles` table; this is
+   *     the preferred way going forward), OR
+   *   - `role` (legacy enum string — kept for backward-compatibility with
+   *     existing API consumers and the SSO flow). When roleId is omitted but
+   *     role is provided, we look up the seeded system Role row by its
+   *     roleKey to derive a roleId, so every new user lands with both fields
+   *     populated.
    */
   async create(organizationId, createdBy, data) {
-    const { email, firstName, lastName, role, phoneNumber, department, jobTitle, password } = data;
+    const { email, firstName, lastName, role, roleId, phoneNumber, department, jobTitle, password } = data;
 
     // Check if email already exists
     const existingUser = await User.findOne({
@@ -105,6 +114,29 @@ class UserService {
     const userPassword = password || this.generateTemporaryPassword();
     const temporaryPassword = userPassword; // Store plain password for email
 
+    // Resolve the Phase 2 Role row + the legacy enum string. Both columns
+    // get populated so the legacy fallback paths keep working.
+    const roleService = require('./roleService');
+    let resolvedRoleRow = null;
+    if (roleId) {
+      resolvedRoleRow = await roleService.getRoleById(roleId, organizationId);
+      if (!resolvedRoleRow) throw new AppError('Unknown roleId', 400);
+    } else {
+      const roleKey = role || 'operator';
+      resolvedRoleRow = await roleService.findSystemRoleByKey(organizationId, roleKey);
+      // For non-system role names (custom role), look up by name.
+      if (!resolvedRoleRow) {
+        const byName = await roleService.getRoleByName(roleKey, organizationId);
+        if (byName) resolvedRoleRow = byName;
+      }
+    }
+    // Effective legacy enum value: prefer the Role row's roleKey (set on
+    // system rows). For custom roles, fall back to 'operator' so the enum
+    // column stays satisfied even though it isn't authoritative anymore.
+    const legacyRoleEnum = resolvedRoleRow?.roleKey || role || 'operator';
+    const effectivePermissions = resolvedRoleRow?.permissions
+      || authService.getDefaultPermissions(legacyRoleEnum);
+
     // Create user
     const user = await User.create({
       organizationId,
@@ -112,12 +144,13 @@ class UserService {
       passwordHash: userPassword, // Will be hashed by beforeCreate hook
       firstName,
       lastName,
-      role: role || 'operator',
+      role: legacyRoleEnum,
+      roleId: resolvedRoleRow?.id || null,
       status: 'pending',
       phoneNumber,
       department,
       jobTitle,
-      permissions: authService.getDefaultPermissions(role || 'operator'),
+      permissions: effectivePermissions,
       mustChangePassword: true, // Require password change on first login
     });
 
@@ -139,21 +172,38 @@ class UserService {
   }
 
   /**
-   * Update user
+   * Update user. Either `roleId` (Phase 2) or `role` (legacy enum) may be
+   * provided to re-assign; we resolve to a Role row, set both columns, and
+   * (when reassigning) reset the user's per-user permission overrides to
+   * the new role's permissions so the change actually takes effect.
    */
   async update(userId, organizationId, data) {
     const user = await this.getById(userId, organizationId);
 
-    const { firstName, lastName, role, status, phoneNumber, department, jobTitle, permissions } = data;
+    const { firstName, lastName, role, roleId, status, phoneNumber, department, jobTitle, permissions } = data;
 
     const updateData = {};
     if (firstName !== undefined) updateData.firstName = firstName;
     if (lastName !== undefined) updateData.lastName = lastName;
-    if (role !== undefined) {
-      updateData.role = role;
-      // Update permissions when role changes
-      updateData.permissions = authService.getDefaultPermissions(role);
+
+    if (roleId !== undefined || role !== undefined) {
+      const roleService = require('./roleService');
+      let row = null;
+      if (roleId !== undefined && roleId !== null) {
+        row = await roleService.getRoleById(roleId, organizationId);
+        if (!row) throw new AppError('Unknown roleId', 400);
+      } else if (role !== undefined) {
+        row = await roleService.findSystemRoleByKey(organizationId, role)
+          || await roleService.getRoleByName(role, organizationId);
+      }
+      updateData.role = row?.roleKey || role || user.role;
+      updateData.roleId = row?.id || null;
+      // Reset per-user permission overrides so the assignment actually shifts
+      // the effective permission set. If the caller also passed `permissions`
+      // explicitly below, that wins.
+      updateData.permissions = row?.permissions || authService.getDefaultPermissions(updateData.role);
     }
+
     if (status !== undefined) updateData.status = status;
     if (phoneNumber !== undefined) updateData.phoneNumber = phoneNumber;
     if (department !== undefined) updateData.department = department;

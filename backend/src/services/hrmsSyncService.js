@@ -163,6 +163,16 @@ async function upsertOne(organizationId, createdById, hrmsRow, source = 'api') {
 async function syncForOrg(organizationId) {
   const stats = { inserted: 0, updated: 0, skipped: 0, pages: 0 };
 
+  // Per-tenant feature gate. HRMS sync ships as a paid-tier feature; super
+  // admin can flip it off via Organization.featureOverrides without touching
+  // the saved API URL.
+  const { Organization } = require('../models');
+  const { effectiveFlags } = require('../utils/featureFlags');
+  const org = await Organization.findByPk(organizationId);
+  if (!effectiveFlags(org).hrmsSync) {
+    return { ...stats, error: 'HRMS sync is not enabled for this organization' };
+  }
+
   const settings = await OrganizationSettings.findOne({ where: { organizationId } });
   if (!settings || !settings.hrmsApiUrl) {
     return { ...stats, error: 'HRMS API not configured for this organization' };
@@ -268,10 +278,19 @@ async function syncForOrg(organizationId) {
  * Failures on one org don't stop the others.
  */
 async function syncForAllConfiguredOrgs() {
-  const orgs = await OrganizationSettings.findAll({
+  const { Organization } = require('../models');
+  const { effectiveFlags } = require('../utils/featureFlags');
+  const candidates = await OrganizationSettings.findAll({
     where: { hrmsApiUrl: { [Op.ne]: null } },
     attributes: ['organizationId', 'hrmsApiUrl'],
   });
+  // Per-tenant feature gate — skip tenants whose plan/override has hrmsSync
+  // disabled so we don't poll their HRMS endpoint at all. Logs stay clean.
+  const orgs = [];
+  for (const s of candidates) {
+    const org = await Organization.findByPk(s.organizationId);
+    if (effectiveFlags(org).hrmsSync) orgs.push(s);
+  }
   let totalInserted = 0;
   let totalUpdated = 0;
   let totalErrors = 0;

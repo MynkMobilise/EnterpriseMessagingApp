@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
-import { Search, Check, Plus, Trash2, Upload, Download, Users } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Search, Check, Plus, Trash2, Upload, Download, Users, Paperclip, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../../../utils/api';
 import { useOrganization } from '../../../../contexts/OrganizationContext';
 import { SearchableSelect } from '../../../shared/SearchableSelect';
 import type { Channel, Recipient, SendMode } from '../types';
+import { uploadHeaderMediaFile } from './MessageComposer';
 
 interface RecipientSelectorProps {
   channel: Channel;
@@ -20,6 +21,9 @@ interface RecipientSelectorProps {
   onEmailAddressChange?: (email: string) => void;
   fcmToken?: string;
   onFcmTokenChange?: (token: string) => void;
+  // Dynamic Media Header (bulk only, WhatsApp templates with image/video/document headers).
+  // When `headerMediaType` is set, the bulk uploaders + per-row paperclips render.
+  headerMediaType?: 'image' | 'video' | 'document' | null;
 }
 
 export function RecipientSelector({
@@ -35,6 +39,7 @@ export function RecipientSelector({
   onEmailAddressChange,
   fcmToken: externalFcmToken,
   onFcmTokenChange,
+  headerMediaType,
 }: RecipientSelectorProps) {
   const [contactInputMode, setContactInputMode] = useState<'manual' | 'select'>('manual');
   const [contacts, setContacts] = useState<any[]>([]);
@@ -181,6 +186,33 @@ export function RecipientSelector({
   const updateRecipient = (index: number, field: keyof Recipient, value: string) => {
     const updated = [...recipients];
     updated[index] = { ...updated[index], [field]: value };
+    onRecipientsChange(updated);
+  };
+
+  // Per-recipient header-media uploader: uploads via the existing /api/v1/media
+  // endpoint, then writes the returned URL onto that row only. Used in bulk
+  // mode when the selected template has a media header.
+  const [uploadingRow, setUploadingRow] = useState<number | null>(null);
+  const handleRowUpload = async (index: number, file: File | null) => {
+    if (!file || !headerMediaType) return;
+    try {
+      setUploadingRow(index);
+      const { url, name } = await uploadHeaderMediaFile(file, headerMediaType);
+      const updated = [...recipients];
+      updated[index] = { ...updated[index], headerMediaUrl: url, headerMediaName: name };
+      onRecipientsChange(updated);
+      toast.success(`Header media set for row ${index + 1}`);
+    } catch (err: any) {
+      toast.error('Could not upload file', { description: err.message || String(err) });
+    } finally {
+      setUploadingRow(null);
+    }
+  };
+
+  const clearRowHeaderMedia = (index: number) => {
+    const updated = [...recipients];
+    const { headerMediaUrl: _u, headerMediaName: _n, ...rest } = updated[index];
+    updated[index] = rest;
     onRecipientsChange(updated);
   };
 
@@ -457,22 +489,22 @@ export function RecipientSelector({
       {uploadMethod === 'manual' && (
         <div className="space-y-3">
           {recipients.map((recipient, index) => (
-            <div key={index} className="flex gap-2">
+            <div key={index} className="flex gap-2 items-center">
               <input
                 type={channel === 'email' ? 'email' : 'text'}
-                value={channel === 'whatsapp' || channel === 'sms' 
+                value={channel === 'whatsapp' || channel === 'sms'
                   ? (recipient.phone || '')
                   : channel === 'email'
                   ? (recipient.email || '')
                   : (recipient.fcmToken || '')}
                 onChange={(e) => {
-                  const field = channel === 'whatsapp' || channel === 'sms' ? 'phone' 
-                    : channel === 'email' ? 'email' 
+                  const field = channel === 'whatsapp' || channel === 'sms' ? 'phone'
+                    : channel === 'email' ? 'email'
                     : 'fcmToken';
                   updateRecipient(index, field, e.target.value);
                 }}
                 placeholder={
-                  channel === 'whatsapp' || channel === 'sms' 
+                  channel === 'whatsapp' || channel === 'sms'
                     ? '+1 (555) 123-4567'
                     : channel === 'email'
                     ? 'user@example.com'
@@ -487,6 +519,16 @@ export function RecipientSelector({
                 placeholder="Name (optional)"
                 className="flex-1 px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
               />
+              {headerMediaType && (
+                <RowHeaderMediaButton
+                  index={index}
+                  headerMediaType={headerMediaType}
+                  recipient={recipient}
+                  uploading={uploadingRow === index}
+                  onPick={(file) => handleRowUpload(index, file)}
+                  onClear={() => clearRowHeaderMedia(index)}
+                />
+              )}
               <button
                 onClick={() => removeRecipient(index)}
                 className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
@@ -528,10 +570,81 @@ export function RecipientSelector({
           {recipients.length > 0 && (
             <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
               <p className="text-sm text-green-800 dark:text-green-200">✓ {recipients.length} recipients loaded</p>
+              {headerMediaType && (
+                <p className="text-xs text-green-700 dark:text-green-300 mt-1">
+                  Per-recipient header media is only editable in <strong>Manual Entry</strong>.
+                  All loaded recipients will receive the batch-wide header (set above the cost panel) — or the template's saved sample if no batch header is set.
+                </p>
+              )}
             </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---- Per-recipient header media uploader (bulk, manual entry) -------- */
+
+interface RowHeaderMediaButtonProps {
+  index: number;
+  headerMediaType: 'image' | 'video' | 'document';
+  recipient: Recipient;
+  uploading: boolean;
+  onPick: (file: File | null) => void;
+  onClear: () => void;
+}
+
+function RowHeaderMediaButton({
+  index, headerMediaType, recipient, uploading, onPick, onClear,
+}: RowHeaderMediaButtonProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const ACCEPT: Record<'image' | 'video' | 'document', string> = {
+    image: 'image/jpeg,image/png',
+    video: 'video/mp4,video/3gpp',
+    document: 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain',
+  };
+  const hasMedia = !!recipient.headerMediaUrl;
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading}
+        className={`p-2 rounded-lg border transition-colors ${
+          hasMedia
+            ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-700 dark:bg-green-900/20 dark:text-green-300'
+            : 'border-gray-300 bg-gray-50 text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800'
+        } disabled:opacity-50`}
+        title={hasMedia
+          ? `Header media: ${recipient.headerMediaName || 'uploaded file'} — click to replace`
+          : `Upload a header ${headerMediaType} for row ${index + 1}`}
+      >
+        {uploading ? (
+          <span className="text-xs">…</span>
+        ) : hasMedia ? (
+          <Check className="w-4 h-4" />
+        ) : (
+          <Paperclip className="w-4 h-4" />
+        )}
+      </button>
+      {hasMedia && (
+        <button
+          type="button"
+          onClick={onClear}
+          className="p-1.5 text-gray-400 hover:text-red-600 rounded"
+          title="Clear header media for this row"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept={ACCEPT[headerMediaType]}
+        onChange={(e: any) => onPick(e.target.files?.[0] || null)}
+        className="hidden"
+      />
     </div>
   );
 }

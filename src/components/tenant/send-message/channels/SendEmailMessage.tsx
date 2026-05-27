@@ -5,6 +5,7 @@ import { apiService } from '../../../../utils/api';
 import { SendModeSelector } from '../SendModeSelector';
 import { RecipientSelector } from '../shared/RecipientSelector';
 import { MessageComposer } from '../shared/MessageComposer';
+import { resolveContactBindings } from '../shared/variableBindings';
 import type { SendMode, MessageType, Recipient, MessageData } from '../types';
 import { estimateCost, formatINR, rateBreakdown } from '../../../../utils/pricing';
 
@@ -54,7 +55,7 @@ export function SendEmailMessage() {
         const bulkRecipients = recipients.map((r) => ({
           email: r.email,
           name: r.name,
-          variables: placeholders,
+          variables: resolveContactBindings(placeholders, r),
         }));
 
         const response = await apiService.messages.sendBulk({
@@ -180,6 +181,7 @@ export function SendEmailMessage() {
             onTextMessageChange={setTextMessage}
             attachment={null}
             onAttachmentChange={() => {}}
+            sendMode={sendMode}
           />
 
           {/* Advanced Options */}

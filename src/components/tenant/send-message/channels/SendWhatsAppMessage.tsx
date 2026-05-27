@@ -4,9 +4,11 @@ import { toast } from 'sonner';
 import { apiService } from '../../../../utils/api';
 import { SendModeSelector } from '../SendModeSelector';
 import { RecipientSelector } from '../shared/RecipientSelector';
-import { MessageComposer, WhatsAppTemplatePreview } from '../shared/MessageComposer';
+import { MessageComposer, WhatsAppTemplatePreview, uploadHeaderMediaFile } from '../shared/MessageComposer';
+import { resolveContactBindings } from '../shared/variableBindings';
 import type { Channel, SendMode, MessageType, Recipient, MessageData, Template } from '../types';
 import { estimateCost, formatINR, rateBreakdown } from '../../../../utils/pricing';
+import { Paperclip, RefreshCw } from 'lucide-react';
 
 export function SendWhatsAppMessage() {
   const [sendMode, setSendMode] = useState<SendMode>('single');
@@ -22,6 +24,18 @@ export function SendWhatsAppMessage() {
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
   const [selectedTemplateData, setSelectedTemplateData] = useState<Template | null>(null);
+  // Dynamic media header — single-send override (operator clicks Replace below
+  // the template picker) AND batch-wide default (set in the right panel when
+  // sendMode === 'bulk'). Both are stored here so the preview, the panel, and
+  // handleSend all read from one source. Per-recipient overrides live on each
+  // Recipient row (managed by RecipientSelector).
+  const [headerMediaUrl, setHeaderMediaUrl] = useState<string | null>(null);
+  const [bulkHeaderUploading, setBulkHeaderUploading] = useState(false);
+
+  const headerMediaType = (selectedTemplateData?.headerType
+    && ['image', 'video', 'document'].includes(selectedTemplateData.headerType))
+    ? (selectedTemplateData.headerType as 'image' | 'video' | 'document')
+    : null;
 
   // WhatsApp pricing: per-template-category for template sends; free-text
   // replies inside the 24-hr customer-service window are "service" tier (free).
@@ -65,7 +79,15 @@ export function SendWhatsAppMessage() {
         const bulkRecipients = recipients.map((r) => ({
           phone: r.phone,
           name: r.name,
-          variables: placeholders,
+          // Each recipient's variables resolved independently — binding tokens
+          // like {{contact.name}} expand to that recipient's name, blank if
+          // the contact has no value saved for that field.
+          variables: resolveContactBindings(placeholders, r),
+          // Per-recipient header media override (uploaded via the paperclip
+          // icon on the row in RecipientSelector). When unset, backend falls
+          // back to the batch-wide headerMediaUrl below, then the template's
+          // saved sample.
+          ...(r.headerMediaUrl ? { headerMediaUrl: r.headerMediaUrl } : {}),
         }));
 
         const response = await apiService.messages.sendBulk({
@@ -75,6 +97,9 @@ export function SendWhatsAppMessage() {
           recipients: bulkRecipients,
           priority: 'normal',
           skipApproval,
+          // Batch-wide default for the dynamic media header (set in the right
+          // panel — applies to every recipient that didn't set their own).
+          ...(headerMediaUrl ? { headerMediaUrl } : {}),
         });
 
         if (response.success) {
@@ -100,6 +125,12 @@ export function SendWhatsAppMessage() {
         if (messageType === 'template') {
           messageData.templateId = selectedTemplate;
           messageData.variables = placeholders;
+          // Operator clicked Replace under the template picker — pass the
+          // uploaded /uploads/... URL through so the backend uses it instead
+          // of the template's stored sample media.
+          if (headerMediaUrl) {
+            messageData.headerMediaUrl = headerMediaUrl;
+          }
         } else {
           messageData.content = textMessage;
         }
@@ -115,6 +146,7 @@ export function SendWhatsAppMessage() {
           setTextMessage('');
           setSelectedTemplate('');
           setPlaceholders({});
+          setHeaderMediaUrl(null);
         } else {
           toast.error('Failed to send message', { id: 'send-message' });
         }
@@ -147,6 +179,10 @@ export function SendWhatsAppMessage() {
               onContactSelect={setSelectedContactId}
               phoneNumber={phoneNumber}
               onPhoneNumberChange={setPhoneNumber}
+              // Per-recipient header uploader only renders when the selected
+              // template actually has a media header. In single mode this is
+              // ignored — the single-send uploader lives in MessageComposer.
+              headerMediaType={sendMode === 'bulk' ? headerMediaType : null}
             />
           </div>
 
@@ -164,6 +200,11 @@ export function SendWhatsAppMessage() {
             attachment={attachment}
             onAttachmentChange={setAttachment}
             onSelectedTemplateChange={setSelectedTemplateData}
+            sendMode={sendMode}
+            // Single-mode dynamic-media override flows through here. In bulk
+            // mode the equivalent panel lives in the right rail (below).
+            headerMediaUrl={sendMode === 'single' ? headerMediaUrl : null}
+            onHeaderMediaUrlChange={setHeaderMediaUrl}
           />
 
           {/* Advanced Options */}
@@ -208,6 +249,20 @@ export function SendWhatsAppMessage() {
 
         {/* Sidebar */}
         <div className="space-y-6 lg:sticky lg:top-20 lg:self-start">
+          {/* Bulk batch-wide header media — only rendered when the selected
+              template has a media header AND we're in bulk mode. Each
+              recipient can still override this via their row's paperclip. */}
+          {sendMode === 'bulk' && headerMediaType && (
+            <BulkHeaderMediaPanel
+              headerType={headerMediaType}
+              templateSavedUrl={selectedTemplateData?.headerContent || ''}
+              batchUrl={headerMediaUrl}
+              uploading={bulkHeaderUploading}
+              onUploadingChange={setBulkHeaderUploading}
+              onBatchUrlChange={setHeaderMediaUrl}
+            />
+          )}
+
           {/* Cost Estimate */}
           <div className="colorful bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-xl border border-green-200 dark:border-green-800 p-6">
             <div className="flex items-start gap-3 mb-4">
@@ -252,10 +307,92 @@ export function SendWhatsAppMessage() {
               <WhatsAppTemplatePreview
                 template={selectedTemplateData}
                 placeholders={placeholders}
+                // Preview reflects whatever bytes the customer will actually
+                // see: single-mode override, batch-wide default in bulk, or
+                // the template's saved sample. Per-recipient overrides aren't
+                // previewed (the bubble shows one message at a time).
+                headerMediaOverride={headerMediaUrl}
               />
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---- Bulk batch-wide header media panel ------------------------------ */
+
+interface BulkHeaderMediaPanelProps {
+  headerType: 'image' | 'video' | 'document';
+  templateSavedUrl: string;
+  batchUrl: string | null;
+  uploading: boolean;
+  onUploadingChange: (v: boolean) => void;
+  onBatchUrlChange: (url: string | null) => void;
+}
+
+function BulkHeaderMediaPanel({
+  headerType, templateSavedUrl, batchUrl, uploading, onUploadingChange, onBatchUrlChange,
+}: BulkHeaderMediaPanelProps) {
+  const ACCEPT: Record<'image' | 'video' | 'document', string> = {
+    image: 'image/jpeg,image/png',
+    video: 'video/mp4,video/3gpp',
+    document: 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain',
+  };
+  const MAX_MB: Record<'image' | 'video' | 'document', number> = { image: 5, video: 16, document: 100 };
+
+  const onPick = async (e: any) => {
+    const file: File | undefined = e.target.files?.[0];
+    if (!file) return;
+    try {
+      onUploadingChange(true);
+      const { url } = await uploadHeaderMediaFile(file, headerType);
+      onBatchUrlChange(url);
+      toast.success('Batch header media set');
+    } catch (err: any) {
+      toast.error('Could not upload file', { description: err.message || String(err) });
+    } finally {
+      onUploadingChange(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const isSet = !!batchUrl;
+  return (
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4 space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-gray-900 dark:text-white">
+          Header media — for everyone
+        </p>
+        <span className="text-xs text-gray-500">
+          {headerType} · max {MAX_MB[headerType]} MB
+        </span>
+      </div>
+      <p className="text-xs text-gray-500">
+        {isSet
+          ? 'All recipients get this file unless their row has its own upload.'
+          : (templateSavedUrl
+              ? 'Falls back to the template’s saved sample. Upload here to override for the whole batch.'
+              : 'Template has no saved sample — upload a default for everyone.')}
+      </p>
+      <div className="flex items-center gap-2">
+        <label className="flex-1 cursor-pointer text-xs px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-center hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center gap-1">
+          <Paperclip className="w-3 h-3" />
+          {uploading ? 'Uploading…' : (isSet ? 'Change file' : 'Upload one for everyone')}
+          <input type="file" accept={ACCEPT[headerType]} onChange={onPick} className="hidden" disabled={uploading} />
+        </label>
+        {isSet && (
+          <button
+            type="button"
+            onClick={() => onBatchUrlChange(null)}
+            className="text-xs px-2 py-2 text-gray-600 hover:text-red-600 flex items-center gap-1"
+            title="Clear batch-wide header — fall back to the template’s saved sample"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Reset
+          </button>
+        )}
       </div>
     </div>
   );

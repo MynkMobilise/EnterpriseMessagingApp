@@ -6,6 +6,7 @@ import { useOrganization } from '../../../../contexts/OrganizationContext';
 import { SendModeSelector } from '../SendModeSelector';
 import { RecipientSelector } from '../shared/RecipientSelector';
 import { MessageComposer } from '../shared/MessageComposer';
+import { resolveContactBindings } from '../shared/variableBindings';
 import type { SendMode, MessageType, Recipient, MessageData, Template } from '../types';
 import { estimateCost, formatINR, rateBreakdown } from '../../../../utils/pricing';
 
@@ -86,7 +87,7 @@ export function SendSMSMessage() {
         const bulkRecipients = recipients.map((r) => ({
           phone: r.phone,
           name: r.name,
-          variables: placeholders,
+          variables: resolveContactBindings(placeholders, r),
         }));
 
         const response = await apiService.messages.sendBulk({
@@ -213,6 +214,7 @@ export function SendSMSMessage() {
             attachment={null}
             onAttachmentChange={() => {}}
             onSelectedTemplateChange={setSelectedTemplateData}
+            sendMode={sendMode}
           />
 
           {/* Advanced Options */}

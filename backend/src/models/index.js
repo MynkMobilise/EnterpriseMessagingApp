@@ -10,6 +10,7 @@ const ContactGroup = require('./ContactGroup');
 const ContactGroupMembership = require('./ContactGroupMembership');
 const ContactGroupUserAssignment = require('./ContactGroupUserAssignment');
 const OrganizationRolePermissions = require('./OrganizationRolePermissions');
+const Role = require('./Role');
 const ContactImport = require('./ContactImport');
 const Template = require('./Template');
 const TemplateImport = require('./TemplateImport');
@@ -269,6 +270,36 @@ Message.belongsTo(BulkMessageBatch, {
   as: 'bulkBatch',
 });
 
+// Bulk Batch - Template / Creator / Organization relationships. Needed by
+// the Campaign Reports service, which includes the template name + channel
+// and the creator's name in the campaign list payload.
+BulkMessageBatch.belongsTo(Template, {
+  foreignKey: 'templateId',
+  as: 'template',
+});
+Template.hasMany(BulkMessageBatch, {
+  foreignKey: 'templateId',
+  as: 'bulkBatches',
+});
+
+BulkMessageBatch.belongsTo(User, {
+  foreignKey: 'createdBy',
+  as: 'creator',
+});
+User.hasMany(BulkMessageBatch, {
+  foreignKey: 'createdBy',
+  as: 'createdBulkBatches',
+});
+
+BulkMessageBatch.belongsTo(Organization, {
+  foreignKey: 'organizationId',
+  as: 'organization',
+});
+Organization.hasMany(BulkMessageBatch, {
+  foreignKey: 'organizationId',
+  as: 'bulkBatches',
+});
+
 // Organization - Media relationship
 Organization.hasMany(Media, {
   foreignKey: 'organizationId',
@@ -313,6 +344,26 @@ SmsConfiguration.belongsTo(Organization, {
   as: 'organization',
 });
 
+// Roles relationships — Phase 2 RBAC. User.roleId points to the Role row
+// that owns their permission map. System rows exist per-org from the
+// migration seed; custom rows are created via /api/v1/roles.
+Organization.hasMany(Role, {
+  foreignKey: 'organizationId',
+  as: 'roles',
+});
+Role.belongsTo(Organization, {
+  foreignKey: 'organizationId',
+  as: 'organization',
+});
+User.belongsTo(Role, {
+  foreignKey: 'roleId',
+  as: 'roleRef',
+});
+Role.hasMany(User, {
+  foreignKey: 'roleId',
+  as: 'users',
+});
+
 module.exports = {
   Organization,
   User,
@@ -326,6 +377,7 @@ module.exports = {
   ContactGroupMembership,
   ContactGroupUserAssignment,
   OrganizationRolePermissions,
+  Role,
   ContactImport,
   Template,
   TemplateImport,

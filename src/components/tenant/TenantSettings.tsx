@@ -7,20 +7,33 @@ import { FCMSettings } from './settings/FCMSettings';
 import { SecuritySettings } from './settings/SecuritySettings';
 import { NotificationSettings } from './settings/NotificationSettings';
 import { SsoIntegrationForm } from './settings/SsoIntegrationForm';
+import { useAuth } from '../../contexts/AuthContext';
 
 export function TenantSettings() {
   const [activeTab, setActiveTab] = useState<'whatsapp' | 'sms' | 'email' | 'fcm' | 'security' | 'notifications' | 'sso'>('whatsapp');
+  const { hasFeature } = useAuth();
 
-
-  const tabs = [
-    { id: 'whatsapp', label: 'WhatsApp API', icon: MessageSquare },
-    { id: 'sms', label: 'SMS API', icon: Smartphone },
-    { id: 'email', label: 'Email API', icon: Mail },
-    { id: 'fcm', label: 'FCM API', icon: Bell },
-    { id: 'sso', label: 'SSO Integration', icon: KeyRound },
-    { id: 'security', label: 'Security', icon: Shield },
+  // Channel-credential tabs only show when that channel is enabled for this
+  // tenant. Backend already 403s on disabled-channel send; this just removes
+  // the dead UI affordance ("why is SMS API tab visible if I can't send SMS").
+  const allTabs = [
+    { id: 'whatsapp', label: 'WhatsApp API', icon: MessageSquare, feature: 'channels.whatsapp' as const },
+    { id: 'sms',      label: 'SMS API',      icon: Smartphone,    feature: 'channels.sms' as const },
+    { id: 'email',    label: 'Email API',    icon: Mail,          feature: 'channels.email' as const },
+    { id: 'fcm',      label: 'FCM API',      icon: Bell,          feature: 'channels.fcm' as const },
+    { id: 'sso',      label: 'SSO Integration', icon: KeyRound },
+    { id: 'security', label: 'Security',     icon: Shield },
     { id: 'notifications', label: 'Notifications', icon: Bell },
   ];
+  const tabs = allTabs.filter((t) => !t.feature || hasFeature(t.feature));
+
+  // If the active tab was for a channel that just got hidden, snap to the
+  // first surviving tab so the panel below renders something.
+  useEffect(() => {
+    if (!tabs.find((t) => t.id === activeTab) && tabs.length > 0) {
+      setActiveTab(tabs[0].id as any);
+    }
+  }, [tabs, activeTab]);
 
   return (
     <div className="p-4 md:p-8">

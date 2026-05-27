@@ -257,8 +257,12 @@ class WhatsAppService {
       // Prepare message payload
       // Extract variables from message metadata or use empty object
       const variables = message.metadata?.variables || message.variables || {};
+      // Per-message header-media override (operator uploaded a different file
+      // at send time — see Dynamic Media Header feature). Null when the send
+      // should fall back to the template's stored sample.
+      const headerMediaOverride = message.metadata?.headerMediaUrl || null;
       const template = message.template;
-      
+
       // Log template and variables for debugging
       logger.info('Preparing WhatsApp payload', {
         messageId: message.id,
@@ -269,12 +273,14 @@ class WhatsAppService {
         buttons: template?.buttons,
         variablesKeys: Object.keys(variables),
         variables: variables,
+        headerMediaOverride,
       });
-      
+
       const payload = await this.prepareMessagePayload(message, settings, variables, template, {
         accessToken,
         phoneNumberId,
         apiVersion,
+        headerMediaOverride,
       });
 
       await traceLogService.logTrace(message.id, 'processing', {
@@ -545,14 +551,20 @@ class WhatsAppService {
     //     uses the approved static text.
     if (template?.headerType && template.headerType !== 'none') {
       const headerType = template.headerType;
-      if (['image', 'video', 'document'].includes(headerType) && template.headerContent) {
+      // Allow the caller to override the template's saved sample media at send
+      // time. The operator may have uploaded a different file (per-send / per-
+      // recipient) that should be the actual bytes the customer receives —
+      // the template's stored headerContent was just the Meta-approval sample.
+      const overrideUrl = sendCtx.headerMediaOverride || null;
+      const sourceUrl = overrideUrl || template.headerContent;
+      if (['image', 'video', 'document'].includes(headerType) && sourceUrl) {
         const { accessToken, phoneNumberId, apiVersion } = sendCtx;
         if (!accessToken || !phoneNumberId) {
           throw new AppError('Missing access token / phone_number_id for header media upload', 500);
         }
         const metaUploadService = require('./metaUploadService');
         const mediaId = await metaUploadService.uploadMessageMedia({
-          localUrl: template.headerContent,
+          localUrl: sourceUrl,
           phoneNumberId,
           accessToken,
           apiVersion,

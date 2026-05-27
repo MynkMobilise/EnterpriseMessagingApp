@@ -7,6 +7,9 @@ export interface User {
   firstName: string;
   lastName: string;
   role: UserRole;
+  // Phase 2 — FK into the new `roles` table. Authoritative when set; the
+  // `role` enum above is the legacy fallback / display-only field.
+  roleId?: number | null;
   status: UserStatus;
   organizationId: string;
   organizationName?: string;
@@ -61,6 +64,9 @@ export interface CreateUserPayload {
   firstName: string;
   lastName: string;
   role: UserRole;
+  // Phase 2 — points at a row in the `roles` table. When omitted but `role`
+  // is set, the backend resolves the matching seeded system row's id.
+  roleId?: number | null;
   organizationId: string;
   phoneNumber?: string;
   department?: string;
@@ -71,6 +77,9 @@ export interface UpdateUserPayload {
   firstName?: string;
   lastName?: string;
   role?: UserRole;
+  // See note on CreateUserPayload. Passing roleId here lets you assign a
+  // CUSTOM role (which has no entry in the legacy UserRole enum).
+  roleId?: number | null;
   status?: UserStatus;
   phoneNumber?: string;
   department?: string;

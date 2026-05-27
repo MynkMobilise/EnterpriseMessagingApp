@@ -1,8 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileText, MessageSquare, Upload, Search, ChevronDown } from 'lucide-react';
+import { FileText, MessageSquare, Upload, Search, ChevronDown, X, Paperclip, RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
 import { apiService, MEDIA_HOST } from '../../../../utils/api';
 import { useOrganization } from '../../../../contexts/OrganizationContext';
-import type { Channel, MessageType, Template } from '../types';
+import type { Channel, MessageType, SendMode, Template } from '../types';
+import {
+  CONTACT_FIELDS,
+  bindContactField,
+  isContactBinding,
+  parseContactBinding,
+  fieldLabel,
+} from './variableBindings';
 
 interface MessageComposerProps {
   channel: Channel;
@@ -19,6 +27,15 @@ interface MessageComposerProps {
   /** Optional — parent can react to the selected template (e.g. compute cost
    *  from category). Fires whenever the resolved template changes. */
   onSelectedTemplateChange?: (template: Template | null) => void;
+  /** When sendMode='bulk' each variable can optionally bind to a contact
+   *  field (name/phone/email) so per-recipient personalization works. */
+  sendMode?: SendMode;
+  /** Single-mode dynamic-media header override. /uploads/... URL when the
+   *  operator uploaded a replacement file, null/undefined when the template's
+   *  saved sample should be used. Bulk mode handles its own equivalents in
+   *  SendWhatsAppMessage's right panel + RecipientSelector. */
+  headerMediaUrl?: string | null;
+  onHeaderMediaUrlChange?: (url: string | null) => void;
 }
 
 export function MessageComposer({
@@ -34,7 +51,11 @@ export function MessageComposer({
   attachment,
   onAttachmentChange,
   onSelectedTemplateChange,
+  sendMode,
+  headerMediaUrl,
+  onHeaderMediaUrlChange,
 }: MessageComposerProps) {
+  const [uploadingHeader, setUploadingHeader] = useState(false);
   const { currentOrganization } = useOrganization();
   const [templates, setTemplates] = useState<Template[]>([]);
 
@@ -255,6 +276,27 @@ export function MessageComposer({
 
           {selectedTemplateData && (
             <>
+              {/* Dynamic header media — single send only. In bulk mode the
+                  equivalent uploaders live in the recipients table (per row)
+                  and as a batch-wide default in the right panel. Only render
+                  for WhatsApp (the other channels don't have a media-header
+                  concept in the same way) and only when the template
+                  actually has a media header. */}
+              {channel === 'whatsapp'
+                && sendMode !== 'bulk'
+                && selectedTemplateData.headerType
+                && ['image', 'video', 'document'].includes(selectedTemplateData.headerType)
+                && (
+                  <HeaderMediaReplacePanel
+                    headerType={selectedTemplateData.headerType as 'image' | 'video' | 'document'}
+                    templateSavedUrl={selectedTemplateData.headerContent || ''}
+                    overrideUrl={headerMediaUrl || null}
+                    uploading={uploadingHeader}
+                    onUploadingChange={setUploadingHeader}
+                    onOverrideChange={(url) => onHeaderMediaUrlChange?.(url)}
+                  />
+                )}
+
               {/* WhatsApp templates render their preview in the right-side
                   panel of SendWhatsAppMessage (sticky, lives next to the
                   cost card). Other channels keep their inline preview here
@@ -282,28 +324,79 @@ export function MessageComposer({
                           ? 'Fill in template variables (found #var# in template):'
                           : 'Fill in template variables:'}
                       </p>
-                      {templateVariables.map((variable, index) => (
-                        <div key={variable}>
-                          <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1 capitalize">
-                            {channel === 'sms' 
-                              ? `Variable ${index + 1} (replaces #var#)`
-                              : variable.replace(/_/g, ' ')}
-                          </label>
-                          <input
-                            type="text"
-                            value={placeholders[variable] || ''}
-                            onChange={(e) =>
-                              onPlaceholderChange({ ...placeholders, [variable]: e.target.value })
-                            }
-                            placeholder={
-                              channel === 'sms' 
-                                ? `Enter value for variable ${index + 1}`
-                                : `Enter ${variable.replace(/_/g, ' ')}`
-                            }
-                            className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
-                          />
-                        </div>
-                      ))}
+                      {templateVariables.map((variable, index) => {
+                        const current = placeholders[variable] || '';
+                        const boundField = parseContactBinding(current);
+                        const isBound = isContactBinding(current);
+                        const bindingValue: 'custom' | string = boundField ? `bind:${boundField}` : 'custom';
+                        return (
+                          <div key={variable}>
+                            <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1 capitalize">
+                              {channel === 'sms'
+                                ? `Variable ${index + 1} (replaces #var#)`
+                                : variable.replace(/_/g, ' ')}
+                            </label>
+                            <div className="flex gap-2">
+                              {/* In bulk mode, let the operator bind this variable
+                                  to a contact field instead of a static value —
+                                  each recipient gets their own name/phone/email. */}
+                              {sendMode === 'bulk' && (
+                                <select
+                                  value={bindingValue}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    if (v === 'custom') {
+                                      onPlaceholderChange({ ...placeholders, [variable]: '' });
+                                    } else {
+                                      const field = v.replace(/^bind:/, '') as any;
+                                      onPlaceholderChange({ ...placeholders, [variable]: bindContactField(field) });
+                                    }
+                                  }}
+                                  className="px-2 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                                  title="Use a saved contact field for each recipient"
+                                >
+                                  <option value="custom">Custom value</option>
+                                  {CONTACT_FIELDS.map((f) => (
+                                    <option key={f.value} value={`bind:${f.value}`}>
+                                      Use {f.label.toLowerCase()}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+
+                              {isBound ? (
+                                <div className="flex-1 flex items-center justify-between gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                                  <span className="text-sm text-blue-900 dark:text-blue-200">
+                                    Each recipient&apos;s <strong>{fieldLabel(boundField as any).toLowerCase()}</strong> · blank if missing
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => onPlaceholderChange({ ...placeholders, [variable]: '' })}
+                                    className="p-1 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded"
+                                    title="Clear binding"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={current}
+                                  onChange={(e) =>
+                                    onPlaceholderChange({ ...placeholders, [variable]: e.target.value })
+                                  }
+                                  placeholder={
+                                    channel === 'sms'
+                                      ? `Enter value for variable ${index + 1}`
+                                      : `Enter ${variable.replace(/_/g, ' ')}`
+                                  }
+                                  className="flex-1 px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                                />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -384,9 +477,12 @@ export function MessageComposer({
 }
 
 // Substitutes {{1}}, {{name}}, etc. Lookup priority:
-//   1. User-typed value from the variable inputs (placeholders)
-//   2. The sample value the operator saved on the template ("John")
-//   3. The raw {{key}} marker (so unfilled-and-no-sample shows clearly)
+//   1. If the placeholder value is a binding token ({{contact.X}}), show the
+//      saved sample so the operator sees a real example value in the preview.
+//      Otherwise show "[Contact X]" as a clear hint.
+//   2. User-typed value from the variable inputs (placeholders).
+//   3. The sample value the operator saved on the template ("John").
+//   4. The raw {{key}} marker (so unfilled-and-no-sample shows clearly).
 function applyPlaceholders(
   content: string,
   placeholders: { [key: string]: string },
@@ -395,6 +491,12 @@ function applyPlaceholders(
   if (!content) return '';
   return content.replace(/\{\{(\w+)\}\}/g, (_m, key) => {
     const typed = placeholders[key];
+    const boundField = parseContactBinding(typed);
+    if (boundField) {
+      const sample = samples[key];
+      if (sample && sample.trim() !== '') return sample;
+      return `[${fieldLabel(boundField as any)}]`;
+    }
     if (typed && typed.trim() !== '') return typed;
     const sample = samples[key];
     if (sample && sample.trim() !== '') return sample;
@@ -411,14 +513,19 @@ function resolveMediaUrl(url?: string): string {
 interface WhatsAppTemplatePreviewProps {
   template: Template;
   placeholders: { [key: string]: string };
+  /** Optional runtime override for the header media. When set, the preview
+   *  shows this file instead of template.headerContent — same precedence the
+   *  backend applies at actual send time. */
+  headerMediaOverride?: string | null;
 }
 
-export function WhatsAppTemplatePreview({ template, placeholders }: WhatsAppTemplatePreviewProps) {
+export function WhatsAppTemplatePreview({ template, placeholders, headerMediaOverride }: WhatsAppTemplatePreviewProps) {
   const samples = template.variableSamples || {};
   const body = applyPlaceholders(template.content || '', placeholders, samples);
   const headerIsMedia = ['image', 'video', 'document'].includes(template.headerType || '');
   const headerIsText = template.headerType === 'text' && !!template.headerContent;
-  const headerMediaUrl = headerIsMedia ? resolveMediaUrl(template.headerContent) : '';
+  const effectiveHeaderSource = headerMediaOverride || template.headerContent;
+  const headerMediaUrl = headerIsMedia ? resolveMediaUrl(effectiveHeaderSource) : '';
   const buttons = Array.isArray(template.buttons) ? template.buttons : [];
   const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -555,6 +662,142 @@ export function WhatsAppTemplatePreview({ template, placeholders }: WhatsAppTemp
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ---- Dynamic Media Header --------------------------------------------- */
+
+// WhatsApp's per-type size caps. Going higher will be rejected by Meta at
+// send time with a cryptic error, so reject client-side with a clear toast.
+const HEADER_TYPE_LIMITS: Record<'image' | 'video' | 'document', { accept: string; maxMB: number }> = {
+  image:    { accept: 'image/jpeg,image/png',                                                       maxMB: 5 },
+  video:    { accept: 'video/mp4,video/3gpp',                                                       maxMB: 16 },
+  document: { accept: 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain', maxMB: 100 },
+};
+
+// Upload one file via the existing POST /api/v1/media endpoint and return the
+// resulting /uploads/... URL + original filename. Throws on validation or
+// upload failure (caller toasts).
+export async function uploadHeaderMediaFile(
+  file: File,
+  headerType: 'image' | 'video' | 'document'
+): Promise<{ url: string; name: string }> {
+  const cap = HEADER_TYPE_LIMITS[headerType];
+  if (!cap) throw new Error(`Unsupported header type: ${headerType}`);
+  const sizeMB = file.size / (1024 * 1024);
+  if (sizeMB > cap.maxMB) {
+    throw new Error(`File is ${sizeMB.toFixed(1)} MB; WhatsApp limit for ${headerType} is ${cap.maxMB} MB.`);
+  }
+  const res: any = await apiService.media.upload(file);
+  // mediaController.upload responds with `{ success, data: { url, id, ... } }`,
+  // and apiService.media.upload returns `response.data` (the outer envelope).
+  const url: string = res?.data?.url || res?.url || '';
+  if (!url) throw new Error('Upload succeeded but server returned no URL.');
+  return { url, name: file.name };
+}
+
+interface HeaderMediaReplacePanelProps {
+  headerType: 'image' | 'video' | 'document';
+  templateSavedUrl: string;
+  overrideUrl: string | null;
+  uploading: boolean;
+  onUploadingChange: (v: boolean) => void;
+  onOverrideChange: (url: string | null) => void;
+}
+
+function HeaderMediaReplacePanel({
+  headerType, templateSavedUrl, overrideUrl, uploading, onUploadingChange, onOverrideChange,
+}: HeaderMediaReplacePanelProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cap = HEADER_TYPE_LIMITS[headerType];
+  const effectiveUrl = overrideUrl || templateSavedUrl;
+  const previewUrl = effectiveUrl
+    ? (effectiveUrl.startsWith('http') ? effectiveUrl : `${MEDIA_HOST}${effectiveUrl}`)
+    : '';
+  const isOverridden = !!overrideUrl;
+
+  const onPick = async (e: any) => {
+    const file: File | undefined = e.target.files?.[0];
+    if (!file) return;
+    try {
+      onUploadingChange(true);
+      const { url } = await uploadHeaderMediaFile(file, headerType);
+      onOverrideChange(url);
+      toast.success('Header media replaced for this send');
+    } catch (err: any) {
+      toast.error('Could not upload header file', { description: err.message || String(err) });
+    } finally {
+      onUploadingChange(false);
+      // Reset so re-picking the SAME file re-fires the change event.
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-sm text-gray-700 dark:text-gray-300 font-medium">
+          Header media ({headerType})
+        </p>
+        <span className="text-xs text-gray-500">
+          max {cap.maxMB} MB
+        </span>
+      </div>
+      <div className="flex items-center gap-3">
+        {/* Thumbnail / icon */}
+        <div className="flex-shrink-0 w-16 h-16 rounded bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 overflow-hidden flex items-center justify-center">
+          {headerType === 'image' && previewUrl ? (
+            <img src={previewUrl} alt="" className="w-full h-full object-cover" data-color />
+          ) : headerType === 'video' && previewUrl ? (
+            <video src={previewUrl} className="w-full h-full object-cover" data-color />
+          ) : (
+            <FileText className="w-6 h-6 text-gray-400" />
+          )}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-gray-900 dark:text-white truncate">
+            {isOverridden
+              ? 'Replaced with your file'
+              : (templateSavedUrl ? 'Using template’s saved sample' : 'No media saved on template')}
+          </p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {isOverridden
+              ? 'The customer will receive your uploaded file.'
+              : 'Click Replace to send a different file with this template.'}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="text-xs px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 flex items-center gap-1"
+          >
+            <Paperclip className="w-3 h-3" />
+            {uploading ? 'Uploading…' : (isOverridden ? 'Change' : 'Replace')}
+          </button>
+          {isOverridden && (
+            <button
+              type="button"
+              onClick={() => onOverrideChange(null)}
+              className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:text-red-600 flex items-center gap-1"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Reset to saved
+            </button>
+          )}
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={cap.accept}
+          onChange={onPick}
+          className="hidden"
+        />
       </div>
     </div>
   );

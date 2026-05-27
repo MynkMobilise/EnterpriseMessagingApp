@@ -1,15 +1,39 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ChannelSelector } from './ChannelSelector';
 import { SendWhatsAppMessage } from './channels/SendWhatsAppMessage';
 import { SendSMSMessage } from './channels/SendSMSMessage';
 import { SendEmailMessage } from './channels/SendEmailMessage';
 import { SendFCMMessage } from './channels/SendFCMMessage';
 import type { Channel } from './types';
+import { useAuth } from '../../../contexts/AuthContext';
 
 export function SendMessage() {
   const [channel, setChannel] = useState<Channel>('whatsapp');
+  const { hasFeature } = useAuth();
+
+  // If the default channel ('whatsapp') is disabled for this tenant, pick the
+  // first one that IS enabled. Without this the page renders an active tab
+  // for a channel the operator can't use.
+  useEffect(() => {
+    const order: Channel[] = ['whatsapp', 'sms', 'email', 'fcm'];
+    const enabled = order.filter((c) => hasFeature(`channels.${c}` as any));
+    if (enabled.length === 0) return; // nothing enabled — sub-page will show its own state
+    if (!enabled.includes(channel)) setChannel(enabled[0]);
+  }, [hasFeature, channel]);
 
   const renderChannelComponent = () => {
+    // Defensive: if this channel got disabled while the user was on it, show
+    // an empty-state. Real backend rejection covers this with a 403 on send.
+    if (!hasFeature(`channels.${channel}` as any)) {
+      return (
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-8 text-center">
+          <p className="text-gray-600 dark:text-gray-400">
+            The {channel.toUpperCase()} channel is not enabled for your organization.
+            Contact your administrator if you need access.
+          </p>
+        </div>
+      );
+    }
     switch (channel) {
       case 'whatsapp':
         return <SendWhatsAppMessage />;
