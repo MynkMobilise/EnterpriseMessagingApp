@@ -63,6 +63,18 @@ function buildWhere(f) {
   if (f.channel) where.channel = f.channel;
   if (f.userId) where.sentBy = f.userId;
 
+  // Group-scoping: when the viewer is non-privileged, f.allowedContactIds is
+  // populated by parseFilters → resolveAllowedContactIds. An empty array means
+  // "no contacts visible" → return a contradiction so every query yields zero
+  // rows instead of leaking org-wide data.
+  if (Array.isArray(f.allowedContactIds)) {
+    if (f.allowedContactIds.length === 0) {
+      where.contactId = { [Op.in]: [-1] }; // guaranteed-no-match
+    } else {
+      where.contactId = { [Op.in]: f.allowedContactIds };
+    }
+  }
+
   // HRMS filters live on the Contact row — we join when at least one is set.
   const contactWhere = {};
   if (f.department) contactWhere.department = f.department;
@@ -581,8 +593,35 @@ async function getFilterOptions(organizationId) {
  * payload. Reuses the same filter object across all sub-queries so totals stay
  * internally consistent.
  */
-async function getDashboard(organizationId, rawFilters) {
+async function getDashboard(organizationId, rawFilters, viewer = null) {
   const f = parseFilters(organizationId, rawFilters);
+
+  // Group-scoping for non-privileged viewers: cap every query to messages
+  // whose recipient contact is in a group this user is assigned to. Resolved
+  // ONCE here and stuffed into f.allowedContactIds so buildWhere can apply
+  // it uniformly. Privileged roles (super_admin/admin/manager) get null and
+  // see everything in their org.
+  if (viewer) {
+    const contactGroupService = require('./contactGroupService');
+    const visibleGroupIds = await contactGroupService.visibleGroupIdsForUser(viewer);
+    if (visibleGroupIds === null) {
+      // privileged — no restriction
+      f.allowedContactIds = null;
+      f.viewerHasNoGroups = false;
+    } else if (visibleGroupIds.length === 0) {
+      // operator/viewer with zero assigned groups → show no data, but render
+      // the page so the operator sees the empty-state hint.
+      f.allowedContactIds = [];
+      f.viewerHasNoGroups = true;
+      f._visibleGroupCount = 0;
+    } else {
+      const ids = await contactGroupService.getContactIdsForGroups(organizationId, visibleGroupIds);
+      f.allowedContactIds = ids || [];
+      f.viewerHasNoGroups = false;
+      f._visibleGroupCount = visibleGroupIds.length;
+    }
+  }
+
   const [
     kpis,
     trend,
@@ -620,6 +659,21 @@ async function getDashboard(organizationId, rawFilters) {
       costCenter: f.costCenter,
       designation: f.designation,
     },
+    // Viewer scope diagnostics: lets the frontend render a helpful banner
+    // when an operator with zero assigned groups lands here (currently shown
+    // as a blank dashboard, which is confusing without the hint).
+    viewerScope: viewer
+      ? {
+          scoped: Array.isArray(f.allowedContactIds),
+          allowedGroupCount: Array.isArray(f.allowedContactIds)
+            ? (f._visibleGroupCount ?? 0)
+            : null,
+          allowedContactCount: Array.isArray(f.allowedContactIds)
+            ? f.allowedContactIds.length
+            : null,
+          hasNoGroups: !!f.viewerHasNoGroups,
+        }
+      : null,
     kpis,
     trend,
     channelBreakdown,

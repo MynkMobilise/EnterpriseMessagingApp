@@ -110,8 +110,16 @@ interface FailureRow {
   failedAt: string;
 }
 
+interface ViewerScope {
+  scoped: boolean;
+  allowedGroupCount: number | null;
+  allowedContactCount: number | null;
+  hasNoGroups: boolean;
+}
+
 interface DashboardPayload {
   filters: any;
+  viewerScope?: ViewerScope | null;
   kpis: Kpis;
   trend: TrendPoint[];
   channelBreakdown: ChannelStat[];
@@ -171,11 +179,15 @@ function fmtCurrency(n: number) {
 }
 
 const DATE_PRESETS = [
-  { label: 'Today', days: 1 },
-  { label: 'Last 7 days', days: 7 },
-  { label: 'Last 30 days', days: 30 },
-  { label: 'Last 90 days', days: 90 },
-  { label: 'Last year', days: 365 },
+  { key: '1', label: 'Today', days: 1 },
+  { key: '7', label: 'Last 7 days', days: 7 },
+  { key: '30', label: 'Last 30 days', days: 30 },
+  { key: '90', label: 'Last 90 days', days: 90 },
+  { key: '365', label: 'Last year', days: 365 },
+  // Special sentinel — leaves the two date inputs visible and editable
+  // so the operator can pick an arbitrary range. The dashboard hides the
+  // date inputs entirely for the other presets to keep the toolbar tight.
+  { key: 'custom', label: 'Custom range', days: null as number | null },
 ];
 
 const CHANNEL_LABELS: Record<string, { label: string; icon: any }> = {
@@ -204,6 +216,10 @@ export function LeadershipDashboard() {
   const [options, setOptions] = useState<FilterOptions | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Which date-preset button is highlighted. Matches DATE_PRESETS[].key.
+  // 'custom' shows the two date inputs; the named presets hide them and use
+  // a tidy chip-only toolbar.
+  const [activePreset, setActivePreset] = useState<string>('30');
 
   // Load filter options once on mount.
   useEffect(() => {
@@ -246,15 +262,22 @@ export function LeadershipDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
 
-  const setPreset = (days: number) => {
-    setFilters((f) => ({
-      ...f,
-      startDate: isoDateOnly(daysAgo(days)),
-      endDate: isoDateOnly(new Date()),
-    }));
+  const setPreset = (key: string, days: number | null) => {
+    setActivePreset(key);
+    if (days != null) {
+      // Named preset (Today / 7 / 30 / 90 / Last year) — overwrite dates.
+      setFilters((f) => ({
+        ...f,
+        startDate: isoDateOnly(daysAgo(days)),
+        endDate: isoDateOnly(new Date()),
+      }));
+    }
+    // For 'custom' we leave the current dates as-is — the user edits them
+    // via the inputs that became visible.
   };
 
   const resetFilters = () => {
+    setActivePreset('30');
     setFilters({
       startDate: isoDateOnly(daysAgo(30)),
       endDate: isoDateOnly(new Date()),
@@ -301,12 +324,29 @@ export function LeadershipDashboard() {
         </button>
       </div>
 
+      {/* Group-scope hint — only shown when the backend tells us this user
+          sees no data because they have no contact groups assigned. Stays
+          rendered above the (empty) widgets so the user knows why. */}
+      {data?.viewerScope?.hasNoGroups && (
+        <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+          You aren't assigned to any contact groups yet, so this dashboard has no data to show.
+          Ask an administrator to assign you to one or more groups in <strong>Contact Groups</strong>.
+        </div>
+      )}
+      {data?.viewerScope?.scoped && !data.viewerScope.hasNoGroups && (
+        <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-3 text-xs text-blue-800 dark:text-blue-200">
+          Scoped to your <strong>{data.viewerScope.allowedGroupCount}</strong> assigned contact group{data.viewerScope.allowedGroupCount === 1 ? '' : 's'}
+          {' '}({data.viewerScope.allowedContactCount} contacts). Administrators see the org-wide view.
+        </div>
+      )}
+
       {/* Filter bar */}
       <FilterBar
         filters={filters}
         options={options}
         onChange={(patch) => setFilters((f) => ({ ...f, ...patch }))}
         onPreset={setPreset}
+        activePreset={activePreset}
         onReset={resetFilters}
         activeCount={activeFilterCount}
       />
@@ -386,13 +426,15 @@ function FilterBar({
   options,
   onChange,
   onPreset,
+  activePreset,
   onReset,
   activeCount,
 }: {
   filters: Filters;
   options: FilterOptions | null;
   onChange: (patch: Partial<Filters>) => void;
-  onPreset: (days: number) => void;
+  onPreset: (key: string, days: number | null) => void;
+  activePreset: string;
   onReset: () => void;
   activeCount: number;
 }) {
@@ -404,38 +446,56 @@ function FilterBar({
     filters.costCenter ||
     filters.designation;
 
+  const isCustom = activePreset === 'custom';
+
   return (
     <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
-      {/* Row 1: date range + presets + channel */}
+      {/* Row 1: presets + (custom-mode) date inputs + channel */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-gray-400" />
-          <input
-            type="date"
-            value={filters.startDate}
-            onChange={(e) => onChange({ startDate: e.target.value })}
-            className="px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
-          />
-          <span className="text-xs text-gray-400">to</span>
-          <input
-            type="date"
-            value={filters.endDate}
-            onChange={(e) => onChange({ endDate: e.target.value })}
-            className="px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
-          />
+        <Calendar className="w-4 h-4 text-gray-400" />
+
+        {/* The preset chips. Active chip is filled so it's easy to see at a
+            glance which range is in effect. "Custom range" reveals the
+            date-input pair to the right. */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {DATE_PRESETS.map((p) => {
+            const active = activePreset === p.key;
+            return (
+              <button
+                key={p.key}
+                onClick={() => onPreset(p.key, p.days)}
+                className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                  active
+                    ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-gray-900 dark:border-white'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
+              >
+                {p.label}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="flex items-center gap-1.5">
-          {DATE_PRESETS.map((p) => (
-            <button
-              key={p.label}
-              onClick={() => onPreset(p.days)}
-              className="px-2.5 py-1 text-xs rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+        {/* Date inputs only when "Custom range" is the active preset. The
+            named presets compute their own dates server-side, so we hide
+            the inputs to keep the toolbar tight. */}
+        {isCustom && (
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={filters.startDate}
+              onChange={(e) => onChange({ startDate: e.target.value })}
+              className="px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+            />
+            <span className="text-xs text-gray-400">to</span>
+            <input
+              type="date"
+              value={filters.endDate}
+              onChange={(e) => onChange({ endDate: e.target.value })}
+              className="px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+            />
+          </div>
+        )}
 
         <div className="h-6 w-px bg-gray-200 dark:bg-gray-700" />
 

@@ -841,6 +841,61 @@ class ContactGroupService {
 
     return this.listAssignedUsers(groupId, organizationId);
   }
+
+  /**
+   * Public wrapper around the module-level visibleGroupIdsForUser helper so
+   * services outside this file (e.g. the Leadership Dashboard, Campaign
+   * Reports) can resolve a user's visible group IDs without importing the
+   * private helper. Returns null for privileged roles (= "no restriction").
+   */
+  async visibleGroupIdsForUser(viewer) {
+    return visibleGroupIdsForUser(viewer);
+  }
+
+  /**
+   * Resolve the deduplicated set of contact ids reachable through a list of
+   * group ids. Handles both static (membership-table) and dynamic
+   * (filter-conditions) groups so the caller doesn't need to know the type.
+   *
+   * Used by the Leadership Dashboard and the Campaign Reports view to scope
+   * the message dataset to "only contacts visible to this operator's
+   * assigned groups". Passing an empty array returns []; passing null is
+   * treated as "no restriction" and returns null so callers can short-circuit.
+   */
+  async getContactIdsForGroups(organizationId, groupIds) {
+    if (groupIds == null) return null;
+    if (!Array.isArray(groupIds) || groupIds.length === 0) return [];
+
+    const groups = await ContactGroup.findAll({
+      where: { id: { [Op.in]: groupIds }, organizationId },
+      attributes: ['id', 'isDynamic', 'filterConditions'],
+    });
+
+    const staticGroupIds = groups.filter((g) => !g.isDynamic).map((g) => g.id);
+    const dynamicGroups = groups.filter((g) => g.isDynamic);
+
+    const ids = new Set();
+
+    if (staticGroupIds.length > 0) {
+      const rows = await ContactGroupMembership.findAll({
+        where: { groupId: { [Op.in]: staticGroupIds } },
+        attributes: ['contactId'],
+      });
+      for (const r of rows) ids.add(r.contactId);
+    }
+
+    for (const g of dynamicGroups) {
+      try {
+        const where = buildContactWhere(g.filterConditions, organizationId);
+        const rows = await Contact.findAll({ where, attributes: ['id'] });
+        for (const r of rows) ids.add(r.id);
+      } catch (_) {
+        // Bad filter JSON on a single group shouldn't take the dashboard down.
+      }
+    }
+
+    return Array.from(ids);
+  }
 }
 
 module.exports = new ContactGroupService();
